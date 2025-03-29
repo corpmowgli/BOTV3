@@ -1,4 +1,4 @@
-// trading/riskManager.js - Gestionnaire de risque optimisé
+// riskManager.js - Version optimisée
 import EventEmitter from 'events';
 
 export class RiskManager extends EventEmitter {
@@ -6,7 +6,7 @@ export class RiskManager extends EventEmitter {
     super();
     this.config = config;
     
-    // Paramètres par défaut pour la gestion du risque
+    // Paramètres de risque
     this.riskParams = {
       maxDrawdown: config.simulation?.maxDrawdown || 15,
       maxLossPerTrade: config.trading?.maxLossPerTrade || 3,
@@ -18,17 +18,15 @@ export class RiskManager extends EventEmitter {
       minTradeAmount: config.trading?.minTradeAmount || 10,
       tradeSize: config.trading?.tradeSize || 2,
       stopLoss: config.trading?.stopLoss || 5,
+      takeProfit: config.trading?.takeProfit || 15,
       trailingStopLoss: config.trading?.trailingStopLoss || false,
       trailingStopDistance: config.trading?.trailingStopDistance || 2,
-      takeProfit: config.trading?.takeProfit || 15,
       minConfidenceThreshold: config.trading?.minConfidenceThreshold || 0.6,
-      // Paramètres spécifiques à Solana
       volatilityMultiplier: config.trading?.volatilityMultiplier || {
         low: 1.0,
         medium: 0.8,
         high: 0.6
       },
-      // Circuit Breaker - suspension du trading si trop de pertes
       circuitBreaker: {
         enabled: config.trading?.circuitBreaker?.enabled !== false,
         consecutiveLosses: config.trading?.circuitBreaker?.consecutiveLosses || 3,
@@ -37,7 +35,7 @@ export class RiskManager extends EventEmitter {
       }
     };
     
-    // État du gestionnaire de risque
+    // État
     this.state = {
       circuitBreakerTriggered: false,
       circuitBreakerExpiry: null,
@@ -53,46 +51,27 @@ export class RiskManager extends EventEmitter {
   }
 
   updateConfig(newConfig) {
+    // Mise à jour des paramètres essentiels
     if (newConfig.trading) {
-      if (newConfig.trading.maxLossPerTrade !== undefined) 
-        this.riskParams.maxLossPerTrade = newConfig.trading.maxLossPerTrade;
-        
-      if (newConfig.trading.maxDailyLoss !== undefined) 
-        this.riskParams.maxDailyLoss = newConfig.trading.maxDailyLoss;
-        
-      if (newConfig.trading.maxExposurePerToken !== undefined)
-        this.riskParams.maxExposurePerToken = newConfig.trading.maxExposurePerToken;
-        
-      if (newConfig.trading.maxOpenPositions !== undefined)
-        this.riskParams.maxOpenPositions = newConfig.trading.maxOpenPositions;
-        
-      if (newConfig.trading.minLiquidity !== undefined)
-        this.riskParams.minLiquidity = newConfig.trading.minLiquidity;
-        
-      if (newConfig.trading.minVolume24h !== undefined)
-        this.riskParams.minVolume24h = newConfig.trading.minVolume24h;
-        
-      if (newConfig.trading.stopLoss !== undefined)
-        this.riskParams.stopLoss = newConfig.trading.stopLoss;
-        
-      if (newConfig.trading.takeProfit !== undefined)
-        this.riskParams.takeProfit = newConfig.trading.takeProfit;
-        
-      if (newConfig.trading.trailingStopLoss !== undefined)
-        this.riskParams.trailingStopLoss = newConfig.trading.trailingStopLoss;
-        
-      if (newConfig.trading.trailingStopDistance !== undefined)
-        this.riskParams.trailingStopDistance = newConfig.trading.trailingStopDistance;
-
-      if (newConfig.trading.tradeSize !== undefined)
-        this.riskParams.tradeSize = newConfig.trading.tradeSize;
+      const t = newConfig.trading;
+      if (t.maxLossPerTrade !== undefined) this.riskParams.maxLossPerTrade = t.maxLossPerTrade;
+      if (t.maxDailyLoss !== undefined) this.riskParams.maxDailyLoss = t.maxDailyLoss;
+      if (t.maxExposurePerToken !== undefined) this.riskParams.maxExposurePerToken = t.maxExposurePerToken;
+      if (t.maxOpenPositions !== undefined) this.riskParams.maxOpenPositions = t.maxOpenPositions;
+      if (t.minLiquidity !== undefined) this.riskParams.minLiquidity = t.minLiquidity;
+      if (t.minVolume24h !== undefined) this.riskParams.minVolume24h = t.minVolume24h;
+      if (t.stopLoss !== undefined) this.riskParams.stopLoss = t.stopLoss;
+      if (t.takeProfit !== undefined) this.riskParams.takeProfit = t.takeProfit;
+      if (t.trailingStopLoss !== undefined) this.riskParams.trailingStopLoss = t.trailingStopLoss;
+      if (t.trailingStopDistance !== undefined) this.riskParams.trailingStopDistance = t.trailingStopDistance;
+      if (t.tradeSize !== undefined) this.riskParams.tradeSize = t.tradeSize;
     }
     
-    if (newConfig.simulation && newConfig.simulation.maxDrawdown !== undefined) {
+    if (newConfig.simulation?.maxDrawdown !== undefined) {
       this.riskParams.maxDrawdown = newConfig.simulation.maxDrawdown;
     }
     
-    if (newConfig.trading && newConfig.trading.circuitBreaker) {
+    if (newConfig.trading?.circuitBreaker) {
       this.riskParams.circuitBreaker = {
         ...this.riskParams.circuitBreaker,
         ...newConfig.trading.circuitBreaker
@@ -103,137 +82,114 @@ export class RiskManager extends EventEmitter {
   }
 
   checkPositionAllowed(position, marketData) {
-    // Reset des limites quotidiennes si nécessaire
+    // Reset limites quotidiennes si nécessaire
     this._resetDailyLimitsIfNeeded();
     
-    // Vérification du circuit breaker
-    if (this.state.circuitBreakerTriggered) {
-      if (Date.now() < this.state.circuitBreakerExpiry) {
-        return {
-          allowed: false,
-          reason: `Circuit breaker actif jusqu'à ${new Date(this.state.circuitBreakerExpiry).toLocaleTimeString()}`
-        };
-      } else {
-        this._resetCircuitBreaker();
+    // Vérifications
+    const checks = [
+      // Circuit breaker
+      {
+        condition: this.state.circuitBreakerTriggered && Date.now() < this.state.circuitBreakerExpiry,
+        reason: `Circuit breaker actif jusqu'à ${new Date(this.state.circuitBreakerExpiry).toLocaleTimeString()}`
+      },
+      // Nombre max de positions
+      {
+        condition: position.totalPositions >= this.riskParams.maxOpenPositions,
+        reason: `Nombre maximum de positions ouvertes atteint (${this.riskParams.maxOpenPositions})`
+      },
+      // Liquidité minimale
+      {
+        condition: marketData?.liquidity && marketData.liquidity < this.riskParams.minLiquidity,
+        reason: `Liquidité insuffisante (${marketData?.liquidity} < ${this.riskParams.minLiquidity})`
+      },
+      // Volume minimal
+      {
+        condition: marketData?.volume24h && marketData.volume24h < this.riskParams.minVolume24h,
+        reason: `Volume 24h insuffisant (${marketData?.volume24h} < ${this.riskParams.minVolume24h})`
+      },
+      // Exposition maximale par token
+      {
+        condition: (this.state.exposureByToken.get(position.token) || 0) + position.amount > this.riskParams.maxExposurePerToken,
+        reason: `Exposition maximale par token dépassée`
+      },
+      // Drawdown actuel
+      {
+        condition: this.state.currentDrawdown > this.riskParams.maxDrawdown,
+        reason: `Drawdown maximal dépassé (${this.state.currentDrawdown.toFixed(2)}% > ${this.riskParams.maxDrawdown}%)`
+      },
+      // Pertes quotidiennes
+      {
+        condition: this.state.dailyLoss > this.riskParams.maxDailyLoss,
+        reason: `Perte quotidienne maximale dépassée (${this.state.dailyLoss.toFixed(2)}% > ${this.riskParams.maxDailyLoss}%)`
+      }
+    ];
+    
+    // Vérifier chaque condition
+    for (const check of checks) {
+      if (check.condition) {
+        return { allowed: false, reason: check.reason };
       }
     }
     
-    // Vérification du nombre maximal de positions
-    if (position.totalPositions >= this.riskParams.maxOpenPositions) {
-      return {
-        allowed: false,
-        reason: `Nombre maximum de positions ouvertes atteint (${this.riskParams.maxOpenPositions})`
-      };
-    }
-    
-    // Vérification de la liquidité minimale
-    if (marketData && marketData.liquidity && marketData.liquidity < this.riskParams.minLiquidity) {
-      return {
-        allowed: false,
-        reason: `Liquidité insuffisante (${marketData.liquidity} < ${this.riskParams.minLiquidity})`
-      };
-    }
-    
-    // Vérification du volume minimal
-    if (marketData && marketData.volume24h && marketData.volume24h < this.riskParams.minVolume24h) {
-      return {
-        allowed: false,
-        reason: `Volume 24h insuffisant (${marketData.volume24h} < ${this.riskParams.minVolume24h})`
-      };
-    }
-    
-    // Vérification de l'exposition maximale par token
-    const tokenExposure = this.state.exposureByToken.get(position.token) || 0;
-    if (tokenExposure + position.amount > this.riskParams.maxExposurePerToken) {
-      return {
-        allowed: false,
-        reason: `Exposition maximale par token dépassée (${tokenExposure + position.amount}% > ${this.riskParams.maxExposurePerToken}%)`
-      };
-    }
-    
-    // Vérification du drawdown actuel
-    if (this.state.currentDrawdown > this.riskParams.maxDrawdown) {
-      return {
-        allowed: false,
-        reason: `Drawdown maximal dépassé (${this.state.currentDrawdown.toFixed(2)}% > ${this.riskParams.maxDrawdown}%)`
-      };
-    }
-    
-    // Vérification des limites quotidiennes
-    if (this.state.dailyLoss > this.riskParams.maxDailyLoss) {
-      return {
-        allowed: false,
-        reason: `Perte quotidienne maximale dépassée (${this.state.dailyLoss.toFixed(2)}% > ${this.riskParams.maxDailyLoss}%)`
-      };
-    }
-    
-    // Si tous les contrôles sont passés
+    // Si toutes les vérifications passent
     return { allowed: true };
   }
 
   calculatePositionRisk(token, entryPrice, amount, confidence, marketData = {}) {
-    // Calculer le stop loss et take profit en fonction de la volatilité et de la confiance
+    // Calcul de base du stop loss et take profit
     let stopLossPercent = this.riskParams.stopLoss;
     let takeProfitPercent = this.riskParams.takeProfit;
     
-    // Ajuster en fonction de la volatilité du marché si disponible
+    // Ajustements en fonction de la volatilité et confiance
     if (marketData.volatility) {
       const multiplier = this._getVolatilityMultiplier(marketData.volatility);
       stopLossPercent *= multiplier;
       takeProfitPercent *= multiplier;
     }
     
-    // Ajuster en fonction de la confiance du signal
     if (confidence) {
-      // Plus la confiance est élevée, plus on peut prendre de risque
       const confidenceMultiplier = 0.8 + (confidence * 0.4); // 0.8 à 1.2
       takeProfitPercent *= confidenceMultiplier;
       
-      // Et plus on peut serrer le stop loss
       if (confidence > 0.8) {
-        stopLossPercent *= 0.9; // Stop loss plus serré pour les signaux à forte confiance
+        stopLossPercent *= 0.9; // Stop loss plus serré
       }
     }
     
-    // Calculer les valeurs réelles
+    // Calcul des valeurs
     const stopLossValue = entryPrice * (1 - (stopLossPercent / 100));
     const takeProfitValue = entryPrice * (1 + (takeProfitPercent / 100));
     
-    // Calculer le rapport risque/récompense
+    // Calcul du rapport risque/récompense
     const risk = entryPrice - stopLossValue;
     const reward = takeProfitValue - entryPrice;
     const riskRewardRatio = reward / (risk || 1);
     
-    // Déterminer si c'est une bonne opportunité
-    const isGoodOpportunity = riskRewardRatio >= 1.5;
-    
-    // Ajuster la taille de la position en fonction du risque
+    // Ajustement de la taille de position
     let positionSize = this.riskParams.tradeSize;
     
-    // Réduire la taille pour les opportunités à risque élevé ou faible confiance
     if (riskRewardRatio < 2 || confidence < 0.7) {
       positionSize *= 0.8;
-    }
-    
-    // Augmenter légèrement pour les très bonnes opportunités
-    if (riskRewardRatio > 3 && confidence > 0.8) {
+    } else if (riskRewardRatio > 3 && confidence > 0.8) {
       positionSize *= 1.2;
     }
     
-    // Limiter la taille en fonction de la volatilité
     if (marketData.volatility === 'high') {
       positionSize *= 0.7;
     }
     
-    // Arrondir la taille de la position
-    positionSize = Math.max(this.riskParams.minTradeAmount, Math.min(positionSize, this.riskParams.maxExposurePerToken));
+    // Limites
+    positionSize = Math.max(
+      this.riskParams.minTradeAmount, 
+      Math.min(positionSize, this.riskParams.maxExposurePerToken)
+    );
     
     return {
       stopLoss: stopLossValue,
       takeProfit: takeProfitValue,
       positionSize,
       riskRewardRatio,
-      isGoodOpportunity,
+      isGoodOpportunity: riskRewardRatio >= 1.5,
       trailingStop: this.riskParams.trailingStopLoss ? {
         enabled: true,
         distance: this.riskParams.trailingStopDistance,
@@ -254,11 +210,11 @@ export class RiskManager extends EventEmitter {
       this.state.peakValue = currentValue;
     }
     
-    // Calculer le drawdown actuel
+    // Calculer drawdown
     const drawdown = ((this.state.peakValue - currentValue) / this.state.peakValue) * 100;
     this.state.currentDrawdown = drawdown;
     
-    // Vérifier si le drawdown dépasse le maximum autorisé
+    // Vérifier limites
     if (drawdown > this.riskParams.maxDrawdown) {
       this.emit('risk_limit_reached', {
         type: 'DRAWDOWN_LIMIT',
@@ -291,46 +247,43 @@ export class RiskManager extends EventEmitter {
   recordTradeResult(profit, percentage, initialCapital) {
     const isLoss = profit < 0;
     
-    // Mettre à jour les pertes consécutives
+    // Gestion des pertes
     if (isLoss) {
       this.state.consecutiveLosses++;
       this.state.dailyLoss += Math.abs(percentage);
       
-      // Vérifier si le circuit breaker doit être déclenché
+      // Circuit breaker check
       if (this.riskParams.circuitBreaker.enabled) {
         if (this.state.consecutiveLosses >= this.riskParams.circuitBreaker.consecutiveLosses) {
-          this._triggerCircuitBreaker('Trop de pertes consécutives');
-          return false;
+          return this._triggerCircuitBreaker('Trop de pertes consécutives');
         }
         
         if (this.state.dailyLoss >= this.riskParams.circuitBreaker.maxDailyLossPercent) {
-          this._triggerCircuitBreaker('Perte quotidienne maximale dépassée');
-          return false;
+          return this._triggerCircuitBreaker('Perte quotidienne maximale dépassée');
         }
       }
     } else {
-      // Réinitialiser le compteur de pertes consécutives
+      // Reset des pertes consécutives
       this.state.consecutiveLosses = 0;
     }
     
-    // Mettre à jour le drawdown
+    // Mise à jour du drawdown
     return this.updateDrawdown(initialCapital + profit, initialCapital);
   }
 
   adjustTrailingStop(position, currentPrice) {
-    if (!position.trailingStop || !position.trailingStop.enabled) return position;
+    if (!position.trailingStop?.enabled) return position;
     
     const isLong = position.direction === 'BUY';
     let updatedStop = position.trailingStop.current;
     
+    // Calcul du nouveau stop
     if (isLong) {
-      // Pour les positions longues
       const potentialStop = currentPrice * (1 - (position.trailingStop.distance / 100));
       if (potentialStop > updatedStop) {
         updatedStop = potentialStop;
       }
     } else {
-      // Pour les positions courtes
       const potentialStop = currentPrice * (1 + (position.trailingStop.distance / 100));
       if (potentialStop < updatedStop) {
         updatedStop = potentialStop;
@@ -348,48 +301,46 @@ export class RiskManager extends EventEmitter {
 
   shouldClosePosition(position, currentPrice) {
     const isLong = position.direction === 'BUY';
+    const effectiveStopLoss = position.trailingStop?.enabled 
+      ? position.trailingStop.current 
+      : position.stopLoss;
     
-    // Vérifier le stop loss
-    if (isLong && currentPrice <= (position.trailingStop?.enabled ? position.trailingStop.current : position.stopLoss)) {
-      return {
-        shouldClose: true,
+    // Vérifications de fermeture
+    const checks = [
+      // Stop loss
+      {
+        condition: (isLong && currentPrice <= effectiveStopLoss) || 
+                  (!isLong && currentPrice >= effectiveStopLoss),
         reason: 'STOP_LOSS'
-      };
-    } else if (!isLong && currentPrice >= (position.trailingStop?.enabled ? position.trailingStop.current : position.stopLoss)) {
-      return {
-        shouldClose: true,
-        reason: 'STOP_LOSS'
-      };
-    }
-    
-    // Vérifier le take profit
-    if (isLong && currentPrice >= position.takeProfit) {
-      return {
-        shouldClose: true,
+      },
+      // Take profit
+      {
+        condition: (isLong && currentPrice >= position.takeProfit) ||
+                  (!isLong && currentPrice <= position.takeProfit),
         reason: 'TAKE_PROFIT'
-      };
-    } else if (!isLong && currentPrice <= position.takeProfit) {
-      return {
-        shouldClose: true,
-        reason: 'TAKE_PROFIT'
-      };
-    }
-    
-    // Vérifier la durée maximale si définie
-    if (position.maxDuration && (Date.now() - position.entryTime) > position.maxDuration) {
-      return {
-        shouldClose: true,
+      },
+      // Durée maximale
+      {
+        condition: position.maxDuration && (Date.now() - position.entryTime) > position.maxDuration,
         reason: 'MAX_DURATION_EXCEEDED'
-      };
+      }
+    ];
+    
+    // Vérifier chaque condition
+    for (const check of checks) {
+      if (check.condition) {
+        return {
+          shouldClose: true,
+          reason: check.reason
+        };
+      }
     }
     
-    return {
-      shouldClose: false
-    };
+    return { shouldClose: false };
   }
 
   isTokenAllowed(token, marketData) {
-    // Vérifier si le token est dans les limites de trading
+    // Vérifier limites
     const tradingLimit = this.state.tradingLimitsByToken.get(token);
     if (tradingLimit && tradingLimit.expiry > Date.now()) {
       return {
@@ -398,10 +349,10 @@ export class RiskManager extends EventEmitter {
       };
     }
     
-    // Vérification de la liquidité et du volume minimaux
+    // Vérifications
     if (marketData) {
       if (marketData.liquidity && marketData.liquidity < this.riskParams.minLiquidity) {
-        this._addTradingLimit(token, 'LIQUIDITY_TOO_LOW', 24 * 60 * 60 * 1000); // 24h
+        this._addTradingLimit(token, 'LIQUIDITY_TOO_LOW', 24 * 60 * 60 * 1000);
         return {
           allowed: false,
           reason: 'Liquidité insuffisante'
@@ -409,7 +360,7 @@ export class RiskManager extends EventEmitter {
       }
       
       if (marketData.volume24h && marketData.volume24h < this.riskParams.minVolume24h) {
-        this._addTradingLimit(token, 'VOLUME_TOO_LOW', 12 * 60 * 60 * 1000); // 12h
+        this._addTradingLimit(token, 'VOLUME_TOO_LOW', 12 * 60 * 60 * 1000);
         return {
           allowed: false,
           reason: 'Volume insuffisant'
@@ -421,30 +372,21 @@ export class RiskManager extends EventEmitter {
   }
 
   calculateMaxPositionSize(token, price, portfolioValue) {
-    // Calculer la taille maximale de position en fonction du portefeuille
+    // Calcul basé sur le portefeuille
     const maxSizeByPortfolio = (portfolioValue * (this.riskParams.maxExposurePerToken / 100)) / price;
     
-    // Récupérer l'exposition actuelle
+    // Calcul basé sur l'exposition restante
     const currentExposure = this.state.exposureByToken.get(token) || 0;
     const remainingExposure = (this.riskParams.maxExposurePerToken - currentExposure) / 100;
-    
-    // Calculer la taille maximale en fonction de l'exposition restante
     const maxSizeByExposure = (portfolioValue * remainingExposure) / price;
     
-    // Prendre le minimum des deux
+    // Prendre le minimum
     return Math.min(maxSizeByPortfolio, maxSizeByExposure);
   }
 
+  // Méthodes privées
   _getVolatilityMultiplier(volatility) {
-    switch (volatility) {
-      case 'high':
-        return this.riskParams.volatilityMultiplier.high;
-      case 'medium':
-        return this.riskParams.volatilityMultiplier.medium;
-      case 'low':
-      default:
-        return this.riskParams.volatilityMultiplier.low;
-    }
+    return this.riskParams.volatilityMultiplier[volatility] || this.riskParams.volatilityMultiplier.medium;
   }
 
   _triggerCircuitBreaker(reason) {
@@ -475,8 +417,7 @@ export class RiskManager extends EventEmitter {
 
   _getEndOfDay() {
     const now = new Date();
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    return endOfDay.getTime();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
   }
 
   _addTradingLimit(token, reason, duration) {
