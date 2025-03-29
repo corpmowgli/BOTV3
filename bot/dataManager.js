@@ -1,4 +1,4 @@
-// DataManager.js - Version optimisée
+// DataManager.js - Version ultra-optimisée
 import { LRUCache } from '../utils/cache.js';
 
 export class DataManager {
@@ -14,13 +14,8 @@ export class DataManager {
     
     // Stats
     this.stats = {
-      requestsCount: 0,
-      cacheHits: 0,
-      cacheMisses: 0,
-      processingTimes: [],
-      averageProcessingTime: 0,
-      errors: [],
-      lastUpdate: Date.now()
+      requestsCount: 0, cacheHits: 0, cacheMisses: 0, processingTimes: [],
+      averageProcessingTime: 0, errors: [], lastUpdate: Date.now()
     };
     
     // File de préchargement
@@ -34,9 +29,6 @@ export class DataManager {
     this.config = { ...this.config, ...newConfig };
   }
 
-  /**
-   * Récupère les prix de plusieurs tokens
-   */
   async getBatchTokenPrices(tokenMints) {
     if (!tokenMints?.length) return {};
     
@@ -84,9 +76,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Récupère le prix d'un token
-   */
   async getTokenPrice(tokenMint) {
     if (!tokenMint) return null;
     
@@ -106,9 +95,7 @@ export class DataManager {
     try {
       const price = await this.marketData.getTokenPrice(tokenMint);
       
-      if (price != null) {
-        this.priceDataCache.set(`price_${tokenMint}`, price, 60000);
-      }
+      if (price != null) this.priceDataCache.set(`price_${tokenMint}`, price, 60000);
       
       this._recordProcessingTime(Date.now() - startTime);
       return price;
@@ -118,9 +105,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Récupère des données historiques
-   */
   async getHistoricalData(tokenMint, interval = '1h', days = 7) {
     if (!tokenMint) return { prices: [], volumes: [], timestamps: [] };
     
@@ -146,10 +130,7 @@ export class DataManager {
       startDate.setDate(startDate.getDate() - days);
       
       const data = await this.marketData.getHistoricalPrices(
-        tokenMint,
-        startDate.getTime(),
-        endTime.getTime(),
-        interval
+        tokenMint, startDate.getTime(), endTime.getTime(), interval
       );
       
       // Mise en cache
@@ -165,9 +146,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Récupère des données d'un token
-   */
   async getTokenData(tokenMint) {
     if (!tokenMint) return null;
     
@@ -187,9 +165,7 @@ export class DataManager {
     try {
       const data = await this.marketData.aggregateTokenData(tokenMint);
       
-      if (data) {
-        this.tokenInfoCache.set(`info_${tokenMint}`, data, 300000); // 5 minutes
-      }
+      if (data) this.tokenInfoCache.set(`info_${tokenMint}`, data, 300000); // 5 minutes
       
       this._recordProcessingTime(Date.now() - startTime);
       return data;
@@ -199,9 +175,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Récupère les meilleurs tokens
-   */
   async getTopTokens(limit = 20) {
     const startTime = Date.now();
     this.stats.requestsCount++;
@@ -236,9 +209,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Récupère des indicateurs techniques
-   */
   async getIndicators(tokenMint, interval = '1h', days = 7) {
     if (!tokenMint) return null;
     
@@ -283,9 +253,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Récupère l'état du réseau Solana
-   */
   async getSolanaHealth() {
     const startTime = Date.now();
     this.stats.requestsCount++;
@@ -324,9 +291,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Précharge des données
-   */
   async preloadData(tokenMints) {
     if (!tokenMints?.length) return;
     
@@ -339,9 +303,6 @@ export class DataManager {
     }
   }
 
-  /**
-   * Démarre le préchargement
-   */
   async _startPreloading() {
     if (this.isPreloading || !this.preloadQueue.length) return;
     

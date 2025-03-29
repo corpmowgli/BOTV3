@@ -1,10 +1,7 @@
-// CycleManager.js - Version optimisée
+// CycleManager.js - Version ultra-optimisée
 import EventEmitter from 'events';
 import { delay } from '../utils/helpers.js';
 
-/**
- * Gère les cycles de trading du bot
- */
 export class CycleManager extends EventEmitter {
   constructor(config, marketData, strategy, riskManager, positionManager, portfolioManager, logger) {
     super();
@@ -16,44 +13,24 @@ export class CycleManager extends EventEmitter {
     this.portfolioManager = portfolioManager;
     this.logger = logger;
 
-    // État
+    // État et métriques
     this.isRunning = false;
     this.isStopping = false;
     this.cycleInterval = null;
-    
-    // Métriques
     this.metrics = {
-      cycleCount: 0,
-      successfulCycles: 0,
-      failedCycles: 0,
-      lastCycleTime: null,
-      avgCycleDuration: 0,
-      totalCycleDuration: 0,
-      tokensProcessed: 0,
-      signalsGenerated: 0
+      cycleCount: 0, successfulCycles: 0, failedCycles: 0, lastCycleTime: null,
+      avgCycleDuration: 0, totalCycleDuration: 0, tokensProcessed: 0, signalsGenerated: 0
     };
-
-    // Circuit breaker
     this.circuitBreaker = {
-      tripped: false,
-      consecutiveErrors: 0,
-      lastError: null,
-      cooldownUntil: null,
+      tripped: false, consecutiveErrors: 0, lastError: null, cooldownUntil: null,
       maxConsecutiveErrors: config.errorHandling?.maxConsecutiveErrors || 3
     };
-    
-    // Cache
     this.priceCache = new Map();
     this.priceCacheTime = 0;
-    this.priceCacheTTL = 10000; // 10 secondes
-    
-    // Concurrence
+    this.priceCacheTTL = 10000;
     this.concurrencyLimit = config.performance?.tokenConcurrency || 5;
   }
 
-  /**
-   * Démarre le gestionnaire de cycles
-   */
   async start() {
     if (this.isRunning) {
       this.emit('warning', 'Cycle manager is already running');
@@ -65,10 +42,7 @@ export class CycleManager extends EventEmitter {
       this.isStopping = false;
       this.emit('info', 'Cycle manager started');
 
-      // Premier cycle immédiat
       await this.runTradingCycle();
-
-      // Configurer l'intervalle pour les cycles suivants
       const interval = this.config.trading.cycleInterval || 60000;
       this.cycleInterval = setInterval(() => this.runTradingCycle(), interval);
 
@@ -80,9 +54,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Arrête le gestionnaire de cycles
-   */
   async stop() {
     if (!this.isRunning) {
       this.emit('warning', 'Cycle manager is not running');
@@ -92,7 +63,7 @@ export class CycleManager extends EventEmitter {
     try {
       this.isStopping = true;
       this.emit('info', 'Stopping cycle manager...');
-
+      
       if (this.cycleInterval) {
         clearInterval(this.cycleInterval);
         this.cycleInterval = null;
@@ -108,11 +79,7 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Exécute un cycle de trading
-   */
   async runTradingCycle() {
-    // Vérifications préliminaires
     if (this.isStopping || this.checkCircuitBreaker()) return false;
 
     const cycleStartTime = Date.now();
@@ -122,23 +89,16 @@ export class CycleManager extends EventEmitter {
     try {
       this.emit('debug', `Starting trading cycle #${this.metrics.cycleCount}`);
 
-      // Étape 1: Obtention des tokens qualifiés
       const tokens = await this.getQualifiedTokens();
       if (!tokens?.length) {
         this.emit('info', 'No qualified tokens found in this cycle');
         return this.completeCycle(cycleStartTime, true);
       }
 
-      // Étape 2: Préchargement des données
       await this.preloadMarketData(tokens);
-
-      // Étape 3: Analyse des tokens
       await this.processTokensBatch(tokens);
-
-      // Étape 4: Vérification des positions
       await this.checkPositions();
 
-      // Cycle réussi
       this.metrics.successfulCycles++;
       this.resetCircuitBreaker();
       
@@ -152,60 +112,40 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Précharge les données de marché
-   */
   async preloadMarketData(tokens) {
     try {
       const tokenMints = tokens.map(token => token.token_mint);
-      if (tokenMints.length > 0) {
-        await this.marketData.getBatchTokenPrices(tokenMints);
-      }
+      if (tokenMints.length > 0) await this.marketData.getBatchTokenPrices(tokenMints);
     } catch (error) {
       this.emit('warning', `Error preloading market data: ${error.message}`);
-      // Continue l'exécution malgré l'erreur
     }
   }
 
-  /**
-   * Traite un lot de tokens avec limite de concurrence
-   */
   async processTokensBatch(tokens) {
     const batchSize = this.concurrencyLimit;
-    
-    // Filtrer les tokens sans position ouverte
     const openPositions = this.positionManager.getOpenPositions();
     const openPositionTokens = new Set(openPositions.map(p => p.token));
     const tokensToProcess = tokens.filter(token => !openPositionTokens.has(token.token_mint));
     
-    // Traitement par lots
     for (let i = 0; i < tokensToProcess.length; i += batchSize) {
       if (this.isStopping) break;
       
       const batch = tokensToProcess.slice(i, i + batchSize);
-      
-      // Traitement parallèle
       await Promise.all(batch.map(token => this.processToken(token)));
-      
       this.metrics.tokensProcessed += batch.length;
       
-      // Pause entre les lots
       if (i + batchSize < tokensToProcess.length && !this.isStopping) {
         await delay(200);
       }
     }
   }
 
-  /**
-   * Récupère les tokens qualifiés pour analyse
-   */
   async getQualifiedTokens() {
     try {
       const marketData = await this.marketData.getTopTokens(
         this.config.trading.maxTokensToAnalyze || 50
       );
 
-      // Filtrage
       return marketData.filter(token => 
         token.liquidity >= this.config.trading.minLiquidity &&
         token.volume24h >= this.config.trading.minVolume24h
@@ -216,17 +156,10 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Traite un token pour analyse
-   */
   async processToken(token) {
     try {
-      // Vérifier si position déjà ouverte
-      if (this.positionManager.getOpenPositions().some(p => p.token === token.token_mint)) {
-        return;
-      }
+      if (this.positionManager.getOpenPositions().some(p => p.token === token.token_mint)) return;
 
-      // Obtenir données historiques
       const [prices, volumes] = await Promise.all([
         this.getHistoricalPrices(token.token_mint),
         this.getHistoricalVolumes(token.token_mint)
@@ -234,29 +167,20 @@ export class CycleManager extends EventEmitter {
       
       if (!prices || prices.length < 20) return;
 
-      // Analyser avec la stratégie
       const signal = await this.strategy.analyze(token.token_mint, prices, volumes, token);
       
-      if (signal.type !== 'NONE') {
-        this.metrics.signalsGenerated++;
-      }
+      if (signal.type !== 'NONE') this.metrics.signalsGenerated++;
 
-      // Valider et exécuter le signal
       if (signal.type !== 'NONE' && signal.confidence >= this.config.trading.minConfidenceThreshold) {
         if (this.riskManager.canTrade(this.portfolioManager)) {
           const currentPrice = prices[prices.length - 1];
           const positionSize = this.riskManager.calculatePositionSize(currentPrice, this.portfolioManager);
           
           const position = await this.positionManager.openPosition(
-            token.token_mint,
-            currentPrice,
-            positionSize,
-            signal
+            token.token_mint, currentPrice, positionSize, signal
           );
 
-          if (position) {
-            this.emit('info', `Opened position for ${token.token_mint} at ${currentPrice}`);
-          }
+          if (position) this.emit('info', `Opened position for ${token.token_mint} at ${currentPrice}`);
         }
       }
     } catch (error) {
@@ -264,9 +188,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Vérifie les positions ouvertes
-   */
   async checkPositions() {
     try {
       const positions = this.positionManager.getOpenPositions();
@@ -291,9 +212,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Récupère les prix actuels depuis le cache
-   */
   async getCachedCurrentPrices() {
     try {
       const now = Date.now();
@@ -302,17 +220,13 @@ export class CycleManager extends EventEmitter {
 
       const tokens = positions.map(p => p.token);
       
-      // Vérifier cache
       if (this.priceCache.size > 0 && 
           (now - this.priceCacheTime) < this.priceCacheTTL &&
           tokens.every(token => this.priceCache.has(token))) {
         return this.priceCache;
       }
       
-      // Sinon, récupérer les données
       const priceMap = await this.getCurrentPrices();
-      
-      // Mettre à jour cache
       this.priceCache = priceMap;
       this.priceCacheTime = now;
       
@@ -323,9 +237,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Récupère les prix actuels
-   */
   async getCurrentPrices() {
     try {
       const positions = this.positionManager.getOpenPositions();
@@ -334,7 +245,6 @@ export class CycleManager extends EventEmitter {
       const tokens = positions.map(p => p.token);
       const batchPrices = await this.marketData.getBatchTokenPrices(tokens);
       
-      // Convertir en Map
       const priceMap = new Map();
       if (batchPrices && typeof batchPrices === 'object') {
         Object.entries(batchPrices).forEach(([token, price]) => {
@@ -349,9 +259,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Récupère l'historique des prix
-   */
   async getHistoricalPrices(tokenMint) {
     try {
       const endTime = Date.now();
@@ -368,9 +275,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Récupère l'historique des volumes
-   */
   async getHistoricalVolumes(tokenMint) {
     try {
       const endTime = Date.now();
@@ -387,13 +291,9 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Vérifie si le circuit breaker est déclenché
-   */
   checkCircuitBreaker() {
     if (!this.circuitBreaker.tripped) return false;
 
-    // Vérifier si le temps de cooldown est écoulé
     if (this.circuitBreaker.cooldownUntil && Date.now() > this.circuitBreaker.cooldownUntil) {
       this.resetCircuitBreaker();
       this.emit('info', 'Circuit breaker reset after cooldown period');
@@ -403,18 +303,13 @@ export class CycleManager extends EventEmitter {
     return true;
   }
 
-  /**
-   * Incrémente le compteur d'erreurs du circuit breaker
-   */
   incrementCircuitBreaker(error) {
     this.circuitBreaker.consecutiveErrors++;
     this.circuitBreaker.lastError = error;
 
-    // Si seuil atteint, déclencher circuit breaker
     if (this.circuitBreaker.consecutiveErrors >= this.circuitBreaker.maxConsecutiveErrors) {
       this.circuitBreaker.tripped = true;
       
-      // Définir cooldown
       const cooldownMs = this.config.errorHandling?.circuitBreakerTimeout || 300000;
       this.circuitBreaker.cooldownUntil = Date.now() + cooldownMs;
       
@@ -422,9 +317,6 @@ export class CycleManager extends EventEmitter {
     }
   }
 
-  /**
-   * Réinitialise le circuit breaker
-   */
   resetCircuitBreaker() {
     this.circuitBreaker.tripped = false;
     this.circuitBreaker.consecutiveErrors = 0;
@@ -432,13 +324,9 @@ export class CycleManager extends EventEmitter {
     this.circuitBreaker.cooldownUntil = null;
   }
 
-  /**
-   * Termine et enregistre les métriques d'un cycle
-   */
   completeCycle(startTime, success) {
     const cycleDuration = Date.now() - startTime;
     
-    // Mettre à jour métriques
     this.metrics.totalCycleDuration += cycleDuration;
     this.metrics.avgCycleDuration = this.metrics.totalCycleDuration / this.metrics.cycleCount;
     
@@ -446,16 +334,10 @@ export class CycleManager extends EventEmitter {
     return success;
   }
 
-  /**
-   * Retourne les métriques
-   */
   getMetrics() {
     return { ...this.metrics };
   }
 
-  /**
-   * Nettoie les ressources
-   */
   cleanup() {
     if (this.cycleInterval) {
       clearInterval(this.cycleInterval);
