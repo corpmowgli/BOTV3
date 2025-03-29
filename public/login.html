@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SolanaTrader - Connexion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <style>
+    :root {
+      --color-primary: #3949AB;
+      --color-secondary: #5E35B1;
+      --color-success: #43A047;
+      --color-danger: #E53935;
+      --color-background: #1E1E2F;
+      --color-card-bg: #27293D;
+      --color-text-primary: #FFFFFF;
+      --color-text-secondary: #9A9A9A;
+      --color-border: #2c2c41;
+      --spacing-md: 16px;
+      --border-radius: 8px;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--color-background);
+      color: var(--color-text-primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .login-container {
+      width: 100%;
+      max-width: 400px;
+      background-color: var(--color-card-bg);
+      border-radius: var(--border-radius);
+      padding: 30px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+    
+    .login-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .login-header h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+    
+    .login-header p {
+      color: var(--color-text-secondary);
+      font-size: 14px;
+    }
+    
+    .login-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .form-group label {
+      font-weight: 500;
+      font-size: 14px;
+    }
+    
+    .form-group input {
+      padding: 12px;
+      border-radius: var(--border-radius);
+      border: 1px solid var(--color-border);
+      background-color: rgba(0, 0, 0, 0.2);
+      color: var(--color-text-primary);
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--color-primary);
+    }
+    
+    .login-button {
+      background-color: var(--color-primary);
+      color: white;
+      border: none;
+      border-radius: var(--border-radius);
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.3s;
+      margin-top: 10px;
+    }
+    
+    .login-button:hover {
+      background-color: #303F9F;
+    }
+    
+    .login-button:disabled {
+      background-color: #3949AB80;
+      cursor: not-allowed;
+    }
+    
+    .alert {
+      padding: 12px;
+      border-radius: var(--border-radius);
+      background-color: rgba(229, 57, 53, 0.1);
+      border: 1px solid var(--color-danger);
+      color: var(--color-danger);
+      margin-bottom: 15px;
+      display: none;
+    }
+    
+    .loader {
+      border: 3px solid rgba(0, 0, 0, 0.1);
+      border-radius: 50%;
+      border-top: 3px solid var(--color-primary);
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      margin-right: 10px;
+      display: none;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .button-content {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .two-factor {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-header">
+      <h1>SolanaTrader</h1>
+      <p>Connectez-vous pour accéder au dashboard</p>
+    </div>
+    
+    <div class="alert" id="error-alert"></div>
+    
+    <form class="login-form" id="login-form">
+      <div class="form-group">
+        <label for="username">Nom d'utilisateur</label>
+        <input type="text" id="username" name="username" required autocomplete="username">
+      </div>
+      
+      <div class="form-group">
+        <label for="password">Mot de passe</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+      </div>
+      
+      <div class="form-group two-factor" id="two-factor-container">
+        <label for="twoFactorCode">Code d'authentification</label>
+        <input type="text" id="twoFactorCode" name="twoFactorCode" placeholder="Code à 6 chiffres">
+      </div>
+      
+      <button type="submit" class="login-button" id="login-button">
+        <div class="button-content">
+          <div class="loader" id="login-loader"></div>
+          <span>Se connecter</span>
+        </div>
+      </button>
+    </form>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script>
+    (function() {
+      // Si déjà connecté, rediriger vers le dashboard
+      if (localStorage.getItem('token')) {
+        window.location.href = '/';
+      }
+      
+      const loginForm = document.getElementById('login-form');
+      const errorAlert = document.getElementById('error-alert');
+      const loginButton = document.getElementById('login-button');
+      const loginLoader = document.getElementById('login-loader');
+      const twoFactorContainer = document.getElementById('two-factor-container');
+      
+      loginForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        // Masquer erreur précédente
+        errorAlert.style.display = 'none';
+        
+        // Récupérer les données du formulaire
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const twoFactorCode = document.getElementById('twoFactorCode').value;
+        
+        // Vérification basique
+        if (!username || !password) {
+          showError('Veuillez saisir un nom d\'utilisateur et un mot de passe');
+          return;
+        }
+        
+        // Afficher le loader
+        loginButton.disabled = true;
+        loginLoader.style.display = 'block';
+        
+        try {
+          // Demander un token CSRF si nécessaire
+          let csrfToken = '';
+          try {
+            const csrfResponse = await axios.get('/api/csrf-token');
+            csrfToken = csrfResponse.data.csrfToken;
+          } catch (error) {
+            // Continuer même si pas de CSRF
+          }
+          
+          // Envoyer la demande de connexion
+          const response = await axios.post('/api/login', {
+            username,
+            password,
+            twoFactorCode: twoFactorCode || undefined
+          }, {
+            headers: csrfToken ? {
+              'X-CSRF-Token': csrfToken
+            } : {}
+          });
+          
+          // Si 2FA requis
+          if (response.data.requires2FA) {
+            twoFactorContainer.style.display = 'block';
+            loginButton.disabled = false;
+            loginLoader.style.display = 'none';
+            return;
+          }
+          
+          // Connexion réussie
+          if (response.data.token) {
+            localStorage.setItem('token', response.data.token);
+            if (response.data.refreshToken) {
+              localStorage.setItem('refreshToken', response.data.refreshToken);
+            }
+            
+            // Rediriger vers le dashboard
+            window.location.href = '/';
+          } else {
+            throw new Error('Aucun token reçu');
+          }
+        } catch (error) {
+          let errorMessage = 'Erreur de connexion';
+          
+          if (error.response) {
+            errorMessage = error.response.data.error || errorMessage;
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
+          showError(errorMessage);
+          loginButton.disabled = false;
+          loginLoader.style.display = 'none';
+        }
+      });
+      
+      function showError(message) {
+        errorAlert.textContent = message;
+        errorAlert.style.display = 'block';
+      }
+    })();
+  </script>
+</body>
+</html>
