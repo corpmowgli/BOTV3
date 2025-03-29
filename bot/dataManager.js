@@ -1,4 +1,3 @@
-// bot/dataManager.js
 import { LRUCache } from '../utils/cache.js';
 
 export class DataManager {

@@ -1,4 +1,3 @@
-// bot/CycleManager.js
 import EventEmitter from 'events';
 import { delay } from '../utils/helpers.js';
 

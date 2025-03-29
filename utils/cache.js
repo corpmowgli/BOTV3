@@ -1,26 +1,15 @@
-// utils/cache.js
 export class LRUCache {
   constructor(capacity = 100) {
     this.capacity = capacity;
     this.cache = new Map();
     this.expiryTimes = new Map();
-    this.stats = {
-      hits: 0,
-      misses: 0,
-      sets: 0,
-      deletes: 0,
-      clears: 0,
-      expirations: 0
-    };
+    this.stats = {hits:0,misses:0,sets:0,deletes:0,clears:0,expirations:0};
   }
 
   get(key) {
-    if (!this.cache.has(key)) {
-      this.stats.misses++;
-      return undefined;
-    }
+    if(!this.cache.has(key)) {this.stats.misses++;return undefined;}
     const expiryTime = this.expiryTimes.get(key);
-    if (expiryTime && Date.now() > expiryTime) {
+    if(expiryTime && Date.now() > expiryTime) {
       this.delete(key);
       this.stats.misses++;
       this.stats.expirations++;
@@ -34,25 +23,22 @@ export class LRUCache {
   }
 
   set(key, value, ttl = 0) {
-    if (this.cache.has(key)) {
+    if(this.cache.has(key)) {
       this.cache.delete(key);
       this.expiryTimes.delete(key);
-    } 
-    else if (this.cache.size >= this.capacity) {
+    } else if(this.cache.size >= this.capacity) {
       const oldestKey = this.cache.keys().next().value;
       this.cache.delete(oldestKey);
       this.expiryTimes.delete(oldestKey);
     }
     this.cache.set(key, value);
-    if (ttl > 0) {
-      this.expiryTimes.set(key, Date.now() + ttl);
-    }
+    if(ttl > 0) this.expiryTimes.set(key, Date.now() + ttl);
     this.stats.sets++;
     return this;
   }
 
   delete(key) {
-    if (this.cache.has(key)) {
+    if(this.cache.has(key)) {
       this.cache.delete(key);
       this.expiryTimes.delete(key);
       this.stats.deletes++;
@@ -62,9 +48,9 @@ export class LRUCache {
   }
 
   has(key) {
-    if (!this.cache.has(key)) return false;
+    if(!this.cache.has(key)) return false;
     const expiryTime = this.expiryTimes.get(key);
-    if (expiryTime && Date.now() > expiryTime) {
+    if(expiryTime && Date.now() > expiryTime) {
       this.delete(key);
       this.stats.expirations++;
       return false;
@@ -81,8 +67,8 @@ export class LRUCache {
   cleanupExpired() {
     const now = Date.now();
     let count = 0;
-    for (const [key, expiryTime] of this.expiryTimes.entries()) {
-      if (expiryTime && now > expiryTime) {
+    for(const [key, expiryTime] of this.expiryTimes.entries()) {
+      if(expiryTime && now > expiryTime) {
         this.delete(key);
         count++;
       }
@@ -96,14 +82,7 @@ export class LRUCache {
   }
 
   getStats() {
-    return {
-      ...this.stats,
-      size: this.cache.size,
-      capacity: this.capacity,
-      hitRate: this.stats.hits + this.stats.misses > 0 
-        ? (this.stats.hits / (this.stats.hits + this.stats.misses)) * 100 
-        : 0
-    };
+    return {...this.stats,size:this.cache.size,capacity:this.capacity,hitRate:this.stats.hits+this.stats.misses>0?(this.stats.hits/(this.stats.hits+this.stats.misses))*100:0};
   }
 }
 
