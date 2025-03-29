@@ -1,4 +1,3 @@
-// public/js/components/MarketAnalysis.jsx
 import React, { useState, useEffect } from 'react';
 import {
   LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -7,7 +6,6 @@ import {
 import axios from 'axios';
 
 const MarketAnalysis = ({ token = null }) => {
-  // États
   const [marketData, setMarketData] = useState(null);
   const [priceHistory, setPriceHistory] = useState([]);
   const [indicators, setIndicators] = useState(null);
@@ -23,7 +21,6 @@ const MarketAnalysis = ({ token = null }) => {
     bb: true
   });
 
-  // Couleurs pour les graphiques
   const colors = {
     price: '#1E88E5',
     ema9: '#4CAF50',
@@ -35,7 +32,6 @@ const MarketAnalysis = ({ token = null }) => {
     volume: '#3949AB'
   };
 
-  // Charger les données au montage et lors des changements
   useEffect(() => {
     if (!selectedToken) {
       fetchAvailableTokens();
@@ -44,7 +40,6 @@ const MarketAnalysis = ({ token = null }) => {
     }
   }, [selectedToken, timeframe]);
 
-  // Récupérer la liste des tokens disponibles
   const fetchAvailableTokens = async () => {
     try {
       setLoading(true);
@@ -53,7 +48,6 @@ const MarketAnalysis = ({ token = null }) => {
       if (response.data && Array.isArray(response.data)) {
         setAvailableTokens(response.data);
         
-        // Sélectionner le premier token si aucun n'est sélectionné
         if (!selectedToken && response.data.length > 0) {
           setSelectedToken(response.data[0].token_mint);
         }
@@ -67,27 +61,23 @@ const MarketAnalysis = ({ token = null }) => {
     }
   };
 
-  // Récupérer les données d'un token spécifique
   const fetchTokenData = async () => {
     if (!selectedToken) return;
     
     try {
       setLoading(true);
       
-      // Requêtes parallèles pour les données du token
       const [marketInfoRes, priceHistoryRes, indicatorsRes] = await Promise.all([
         axios.get(`/api/tokens/${selectedToken}`),
         axios.get(`/api/tokens/${selectedToken}/history?timeframe=${timeframe}`),
         axios.get(`/api/tokens/${selectedToken}/indicators?timeframe=${timeframe}`)
       ]);
       
-      // Traiter les données
       if (marketInfoRes.data) {
         setMarketData(marketInfoRes.data);
       }
       
       if (priceHistoryRes.data && priceHistoryRes.data.length > 0) {
-        // Formater pour les graphiques
         const formattedData = priceHistoryRes.data.map(candle => ({
           date: new Date(candle.time).toLocaleString(),
           timestamp: candle.time,
@@ -113,21 +103,16 @@ const MarketAnalysis = ({ token = null }) => {
     }
   };
 
-  // Combiner les données de prix avec les indicateurs
   const combinedChartData = () => {
     if (!priceHistory.length || !indicators) return priceHistory;
     
-    // Extraire les indicateurs
     const { ema9, ema21, ema50, bb } = indicators;
     
-    // Mapper sur l'historique des prix
     return priceHistory.map((item, index) => {
-      // Pour les EMA, nous prenons les dernières valeurs disponibles
       const ema9Value = ema9?.values ? ema9.values[ema9.values.length - priceHistory.length + index] : null;
       const ema21Value = ema21?.values ? ema21.values[ema21.values.length - priceHistory.length + index] : null;
       const ema50Value = ema50?.values ? ema50.values[ema50.values.length - priceHistory.length + index] : null;
       
-      // Pour les bandes de Bollinger
       const bbUpper = bb?.upper ? bb.upper[index % bb.upper.length] : null;
       const bbLower = bb?.lower ? bb.lower[index % bb.lower.length] : null;
       const bbMiddle = bb?.middle ? bb.middle[index % bb.middle.length] : null;
@@ -144,20 +129,17 @@ const MarketAnalysis = ({ token = null }) => {
     });
   };
 
-  // Formater la variation de prix
   const formatPriceChange = (change) => {
     if (change === undefined || change === null) return 'N/A';
     const formattedChange = parseFloat(change).toFixed(2);
     return `${formattedChange > 0 ? '+' : ''}${formattedChange}%`;
   };
 
-  // Formater le prix
   const formatPrice = (price) => {
     if (price === undefined || price === null) return 'N/A';
     return parseFloat(price).toFixed(6);
   };
 
-  // Formater le volume
   const formatVolume = (volume) => {
     if (volume === undefined || volume === null) return 'N/A';
     
@@ -170,7 +152,6 @@ const MarketAnalysis = ({ token = null }) => {
     }
   };
 
-  // Formater la liquidité
   const formatLiquidity = (liquidity) => {
     if (liquidity === undefined || liquidity === null) return 'N/A';
     
@@ -183,7 +164,6 @@ const MarketAnalysis = ({ token = null }) => {
     }
   };
 
-  // Vue de chargement
   if (loading && !priceHistory.length) {
     return (
       <div className="loading-container">
@@ -193,7 +173,6 @@ const MarketAnalysis = ({ token = null }) => {
     );
   }
 
-  // Vue d'erreur
   if (error) {
     return (
       <div className="error-container">
@@ -203,7 +182,6 @@ const MarketAnalysis = ({ token = null }) => {
     );
   }
 
-  // Si aucun token n'est sélectionné et que nous avons des tokens disponibles
   if (!selectedToken && availableTokens.length > 0) {
     return (
       <div className="token-selection">
@@ -343,7 +321,6 @@ const MarketAnalysis = ({ token = null }) => {
         </div>
       )}
       
-      {/* Graphique de prix avec indicateurs */}
       <div className="chart-container">
         <h3>Graphique des prix</h3>
         <ResponsiveContainer width="100%" height={400}>
@@ -363,7 +340,6 @@ const MarketAnalysis = ({ token = null }) => {
             <Tooltip />
             <Legend />
             
-            {/* Bandes de Bollinger */}
             {showIndicators.bb && indicators?.bb && (
               <>
                 <Area
@@ -392,7 +368,6 @@ const MarketAnalysis = ({ token = null }) => {
               </>
             )}
             
-            {/* Prix */}
             <Area
               type="monotone"
               dataKey="price"
@@ -402,7 +377,6 @@ const MarketAnalysis = ({ token = null }) => {
               name="Prix"
             />
             
-            {/* EMAs */}
             {showIndicators.ema9 && (
               <Line
                 type="monotone"
@@ -436,7 +410,6 @@ const MarketAnalysis = ({ token = null }) => {
         </ResponsiveContainer>
       </div>
       
-      {/* Graphique de volume */}
       <div className="chart-container">
         <h3>Volume</h3>
         <ResponsiveContainer width="100%" height={150}>
@@ -466,7 +439,6 @@ const MarketAnalysis = ({ token = null }) => {
         </ResponsiveContainer>
       </div>
       
-      {/* Indicateurs techniques */}
       {indicators && (
         <div className="indicators-section">
           <h3>Indicateurs Techniques</h3>

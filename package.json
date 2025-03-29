@@ -12,14 +12,7 @@
       "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
       "lint": "eslint ."
     },
-    "keywords": [
-      "trading",
-      "bot",
-      "solana",
-      "crypto",
-      "automation",
-      "defi"
-    ],
+    "keywords": ["trading", "bot", "solana", "crypto", "automation", "defi"],
     "author": "",
     "license": "MIT",
     "dependencies": {

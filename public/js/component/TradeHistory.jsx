@@ -1,4 +1,3 @@
-// public/js/components/TradeHistory.jsx
 import React, { useState, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
@@ -7,13 +6,12 @@ import {
 import axios from 'axios';
 
 const TradeHistory = () => {
-  // États
   const [tradeData, setTradeData] = useState([]);
   const [dailyPerformance, setDailyPerformance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [timeframe, setTimeframe] = useState('7d');
-  const [view, setView] = useState('list'); // 'list' ou 'chart'
+  const [view, setView] = useState('list');
   const [tokenFilter, setTokenFilter] = useState('all');
   const [pagination, setPagination] = useState({
     currentPage: 1,
@@ -21,25 +19,18 @@ const TradeHistory = () => {
     limit: 50
   });
 
-  // Couleurs
   const profitColor = '#43A047';
   const lossColor = '#E53935';
 
-  // Charger les données au montage et lors des changements de filtre
   useEffect(() => {
     fetchTradeHistory();
     fetchDailyPerformance();
   }, [timeframe, tokenFilter, pagination.currentPage]);
 
-  // Charger l'historique des trades
   const fetchTradeHistory = async () => {
     try {
       setLoading(true);
-
-      // Calculer l'offset basé sur la pagination
       const offset = (pagination.currentPage - 1) * pagination.limit;
-      
-      // Construire l'URL avec les filtres
       let url = `/api/trades?limit=${pagination.limit}&offset=${offset}`;
       
       if (tokenFilter !== 'all') {
@@ -64,10 +55,8 @@ const TradeHistory = () => {
     }
   };
 
-  // Charger les performances quotidiennes
   const fetchDailyPerformance = async () => {
     try {
-      // Déterminer le nombre de jours
       let days = 7;
       if (timeframe === '30d') days = 30;
       else if (timeframe === '90d') days = 90;
@@ -76,7 +65,6 @@ const TradeHistory = () => {
       const response = await axios.get(`/api/daily-performance?limit=${days}`);
       
       if (response.data && response.data.data) {
-        // Formater pour le graphique
         const formattedData = response.data.data.map(day => ({
           date: new Date(day.date).toLocaleDateString(),
           profit: parseFloat(day.profit),
@@ -90,13 +78,11 @@ const TradeHistory = () => {
     }
   };
 
-  // Formater la date
   const formatDate = (timestamp) => {
     if (!timestamp) return 'N/A';
     return new Date(timestamp).toLocaleString();
   };
 
-  // Charger la page précédente
   const goToPreviousPage = () => {
     if (pagination.currentPage > 1) {
       setPagination({
@@ -106,7 +92,6 @@ const TradeHistory = () => {
     }
   };
 
-  // Charger la page suivante
   const goToNextPage = () => {
     if (pagination.currentPage < pagination.totalPages) {
       setPagination({
@@ -116,7 +101,6 @@ const TradeHistory = () => {
     }
   };
 
-  // Calculer les statistiques pour la période
   const calculateStats = () => {
     if (!tradeData || tradeData.length === 0) {
       return { winRate: 0, avgProfit: 0, avgLoss: 0, totalProfit: 0 };
@@ -145,7 +129,6 @@ const TradeHistory = () => {
     };
   };
 
-  // Extraire la liste des tokens uniques
   const getUniqueTokens = () => {
     if (!tradeData || tradeData.length === 0) return [];
     
@@ -155,11 +138,9 @@ const TradeHistory = () => {
     return Array.from(tokens);
   };
 
-  // Statistiques pour affichage
   const stats = calculateStats();
   const uniqueTokens = getUniqueTokens();
 
-  // Vue de chargement
   if (loading && tradeData.length === 0) {
     return (
       <div className="loading-container">
@@ -169,7 +150,6 @@ const TradeHistory = () => {
     );
   }
 
-  // Vue d'erreur
   if (error) {
     return (
       <div className="error-container">
@@ -261,7 +241,6 @@ const TradeHistory = () => {
         </div>
       </div>
       
-      {/* Vue graphique */}
       {view === 'chart' && (
         <div className="chart-container">
           <h3>Performance sur la période</h3>
@@ -288,7 +267,6 @@ const TradeHistory = () => {
         </div>
       )}
       
-      {/* Vue liste */}
       {view === 'list' && (
         <>
           <div className="table-container">
@@ -312,7 +290,6 @@ const TradeHistory = () => {
                   </tr>
                 ) : (
                   tradeData.map((trade, index) => {
-                    // Calculer la durée en heures:minutes
                     const durationMs = trade.exitTime - trade.entryTime;
                     const hours = Math.floor(durationMs / (1000 * 60 * 60));
                     const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -342,7 +319,6 @@ const TradeHistory = () => {
             </table>
           </div>
           
-          {/* Pagination */}
           <div className="pagination">
             <button 
               onClick={goToPreviousPage} 

@@ -1,4 +1,3 @@
-// trading/riskManager.js
 import EventEmitter from 'events';
 
 export class RiskManager extends EventEmitter {
@@ -21,9 +20,7 @@ export class RiskManager extends EventEmitter {
       trailingStopDistance: config.trading?.trailingStopDistance || 2,
       minConfidenceThreshold: config.trading?.minConfidenceThreshold || 0.6,
       volatilityMultiplier: config.trading?.volatilityMultiplier || {
-        low: 1.0,
-        medium: 0.8,
-        high: 0.6
+        low: 1.0, medium: 0.8, high: 0.6
       },
       circuitBreaker: {
         enabled: config.trading?.circuitBreaker?.enabled !== false,
@@ -61,9 +58,7 @@ export class RiskManager extends EventEmitter {
       if (t.trailingStopDistance !== undefined) this.riskParams.trailingStopDistance = t.trailingStopDistance;
       if (t.tradeSize !== undefined) this.riskParams.tradeSize = t.tradeSize;
     }
-    if (newConfig.simulation?.maxDrawdown !== undefined) {
-      this.riskParams.maxDrawdown = newConfig.simulation.maxDrawdown;
-    }
+    if (newConfig.simulation?.maxDrawdown !== undefined) this.riskParams.maxDrawdown = newConfig.simulation.maxDrawdown;
     if (newConfig.trading?.circuitBreaker) {
       this.riskParams.circuitBreaker = {
         ...this.riskParams.circuitBreaker,
@@ -105,11 +100,7 @@ export class RiskManager extends EventEmitter {
         reason: `Perte quotidienne maximale dépassée (${this.state.dailyLoss.toFixed(2)}% > ${this.riskParams.maxDailyLoss}%)`
       }
     ];
-    for (const check of checks) {
-      if (check.condition) {
-        return { allowed: false, reason: check.reason };
-      }
-    }
+    for (const check of checks) if (check.condition) return { allowed: false, reason: check.reason };
     return { allowed: true };
   }
 
@@ -124,9 +115,7 @@ export class RiskManager extends EventEmitter {
     if (confidence) {
       const confidenceMultiplier = 0.8 + (confidence * 0.4);
       takeProfitPercent *= confidenceMultiplier;
-      if (confidence > 0.8) {
-        stopLossPercent *= 0.9;
-      }
+      if (confidence > 0.8) stopLossPercent *= 0.9;
     }
     const stopLossValue = entryPrice * (1 - (stopLossPercent / 100));
     const takeProfitValue = entryPrice * (1 + (takeProfitPercent / 100));
@@ -134,14 +123,9 @@ export class RiskManager extends EventEmitter {
     const reward = takeProfitValue - entryPrice;
     const riskRewardRatio = reward / (risk || 1);
     let positionSize = this.riskParams.tradeSize;
-    if (riskRewardRatio < 2 || confidence < 0.7) {
-      positionSize *= 0.8;
-    } else if (riskRewardRatio > 3 && confidence > 0.8) {
-      positionSize *= 1.2;
-    }
-    if (marketData.volatility === 'high') {
-      positionSize *= 0.7;
-    }
+    if (riskRewardRatio < 2 || confidence < 0.7) positionSize *= 0.8;
+    else if (riskRewardRatio > 3 && confidence > 0.8) positionSize *= 1.2;
+    if (marketData.volatility === 'high') positionSize *= 0.7;
     positionSize = Math.max(
       this.riskParams.minTradeAmount, 
       Math.min(positionSize, this.riskParams.maxExposurePerToken)
@@ -156,20 +140,13 @@ export class RiskManager extends EventEmitter {
         enabled: true,
         distance: this.riskParams.trailingStopDistance,
         current: stopLossValue
-      } : {
-        enabled: false
-      },
-      risk: { 
-        stopLossPercent,
-        takeProfitPercent 
-      }
+      } : { enabled: false },
+      risk: { stopLossPercent, takeProfitPercent }
     };
   }
 
   updateDrawdown(currentValue, initialCapital) {
-    if (currentValue > this.state.peakValue) {
-      this.state.peakValue = currentValue;
-    }
+    if (currentValue > this.state.peakValue) this.state.peakValue = currentValue;
     const drawdown = ((this.state.peakValue - currentValue) / this.state.peakValue) * 100;
     this.state.currentDrawdown = drawdown;
     if (drawdown > this.riskParams.maxDrawdown) {
@@ -190,11 +167,8 @@ export class RiskManager extends EventEmitter {
       this.state.exposureByToken.set(token, currentExposure + amount);
     } else if (operation === 'subtract') {
       const newExposure = Math.max(0, currentExposure - amount);
-      if (newExposure === 0) {
-        this.state.exposureByToken.delete(token);
-      } else {
-        this.state.exposureByToken.set(token, newExposure);
-      }
+      if (newExposure === 0) this.state.exposureByToken.delete(token);
+      else this.state.exposureByToken.set(token, newExposure);
     }
   }
 
@@ -204,16 +178,12 @@ export class RiskManager extends EventEmitter {
       this.state.consecutiveLosses++;
       this.state.dailyLoss += Math.abs(percentage);
       if (this.riskParams.circuitBreaker.enabled) {
-        if (this.state.consecutiveLosses >= this.riskParams.circuitBreaker.consecutiveLosses) {
+        if (this.state.consecutiveLosses >= this.riskParams.circuitBreaker.consecutiveLosses) 
           return this._triggerCircuitBreaker('Trop de pertes consécutives');
-        }
-        if (this.state.dailyLoss >= this.riskParams.circuitBreaker.maxDailyLossPercent) {
+        if (this.state.dailyLoss >= this.riskParams.circuitBreaker.maxDailyLossPercent)
           return this._triggerCircuitBreaker('Perte quotidienne maximale dépassée');
-        }
       }
-    } else {
-      this.state.consecutiveLosses = 0;
-    }
+    } else this.state.consecutiveLosses = 0;
     return this.updateDrawdown(initialCapital + profit, initialCapital);
   }
 
@@ -223,22 +193,12 @@ export class RiskManager extends EventEmitter {
     let updatedStop = position.trailingStop.current;
     if (isLong) {
       const potentialStop = currentPrice * (1 - (position.trailingStop.distance / 100));
-      if (potentialStop > updatedStop) {
-        updatedStop = potentialStop;
-      }
+      if (potentialStop > updatedStop) updatedStop = potentialStop;
     } else {
       const potentialStop = currentPrice * (1 + (position.trailingStop.distance / 100));
-      if (potentialStop < updatedStop) {
-        updatedStop = potentialStop;
-      }
+      if (potentialStop < updatedStop) updatedStop = potentialStop;
     }
-    return {
-      ...position,
-      trailingStop: {
-        ...position.trailingStop,
-        current: updatedStop
-      }
-    };
+    return {...position, trailingStop: {...position.trailingStop, current: updatedStop}};
   }
 
   shouldClosePosition(position, currentPrice) {
@@ -262,39 +222,22 @@ export class RiskManager extends EventEmitter {
         reason: 'MAX_DURATION_EXCEEDED'
       }
     ];
-    for (const check of checks) {
-      if (check.condition) {
-        return {
-          shouldClose: true,
-          reason: check.reason
-        };
-      }
-    }
+    for (const check of checks) if (check.condition) return { shouldClose: true, reason: check.reason };
     return { shouldClose: false };
   }
 
   isTokenAllowed(token, marketData) {
     const tradingLimit = this.state.tradingLimitsByToken.get(token);
-    if (tradingLimit && tradingLimit.expiry > Date.now()) {
-      return {
-        allowed: false,
-        reason: tradingLimit.reason
-      };
-    }
+    if (tradingLimit && tradingLimit.expiry > Date.now()) 
+      return { allowed: false, reason: tradingLimit.reason };
     if (marketData) {
       if (marketData.liquidity && marketData.liquidity < this.riskParams.minLiquidity) {
         this._addTradingLimit(token, 'LIQUIDITY_TOO_LOW', 24 * 60 * 60 * 1000);
-        return {
-          allowed: false,
-          reason: 'Liquidité insuffisante'
-        };
+        return { allowed: false, reason: 'Liquidité insuffisante' };
       }
       if (marketData.volume24h && marketData.volume24h < this.riskParams.minVolume24h) {
         this._addTradingLimit(token, 'VOLUME_TOO_LOW', 12 * 60 * 60 * 1000);
-        return {
-          allowed: false,
-          reason: 'Volume insuffisant'
-        };
+        return { allowed: false, reason: 'Volume insuffisant' };
       }
     }
     return { allowed: true };
@@ -342,10 +285,7 @@ export class RiskManager extends EventEmitter {
   }
 
   _addTradingLimit(token, reason, duration) {
-    this.state.tradingLimitsByToken.set(token, {
-      reason,
-      expiry: Date.now() + duration
-    });
+    this.state.tradingLimitsByToken.set(token, {reason, expiry: Date.now() + duration});
   }
 
   getState() {

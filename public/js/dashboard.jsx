@@ -1,4 +1,3 @@
-// public/js/dashboard.jsx - Dashboard React temps réel
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -9,7 +8,6 @@ import {
 import { io } from 'socket.io-client';
 import axios from 'axios';
 
-// Palette de couleurs
 const COLORS = {
   primary: '#3949AB',
   secondary: '#5E35B1',
@@ -23,22 +21,18 @@ const COLORS = {
   textSecondary: '#9A9A9A'
 };
 
-// Configuration des couleurs pour les graphiques
 const chartColors = [
   '#43A047', '#E53935', '#FFB300', '#039BE5', '#5E35B1', 
   '#26A69A', '#EC407A', '#7CB342', '#AB47BC', '#FFA726'
 ];
 
-// Initialisation Socket.io
 const socket = io({
   auth: {
     token: localStorage.getItem('token')
   }
 });
 
-// Composant principal du Dashboard
 const Dashboard = () => {
-  // États
   const [botStatus, setBotStatus] = useState({ isRunning: false, isPaused: false });
   const [performanceData, setPerformanceData] = useState(null);
   const [recentTrades, setRecentTrades] = useState([]);
@@ -50,14 +44,11 @@ const Dashboard = () => {
   const [notifications, setNotifications] = useState([]);
   const [selectedTimeframe, setSelectedTimeframe] = useState('7d');
 
-  // Initialisation et chargement des données
   useEffect(() => {
-    // Fonction de chargement initial des données
     const loadDashboardData = async () => {
       try {
         setLoading(true);
         
-        // Chargements parallèles
         const [statusRes, perfRes, tradesRes, dailyRes, positionsRes] = await Promise.all([
           axios.get('/api/status'),
           axios.get('/api/performance'),
@@ -66,7 +57,6 @@ const Dashboard = () => {
           axios.get('/api/portfolio')
         ]);
         
-        // Mise à jour des états avec les données
         setBotStatus({
           isRunning: statusRes.data.status === 'running',
           isPaused: statusRes.data.isPaused || false
@@ -77,7 +67,6 @@ const Dashboard = () => {
         setDailyPerformance(dailyRes.data.data || []);
         setOpenPositions(positionsRes.data.openPositions || []);
         
-        // Charger l'analyse par token
         await loadTokenAnalytics();
         
         setLoading(false);
@@ -88,15 +77,12 @@ const Dashboard = () => {
       }
     };
     
-    // Fonction d'analyse des tokens
     const loadTokenAnalytics = async () => {
       try {
-        // Dans un système complet, cette API retournerait des analyses par token
         const res = await axios.get('/api/analytics/tokens');
         setTokenAnalytics(res.data || []);
       } catch (err) {
         console.warn('Erreur lors du chargement des analyses de tokens:', err);
-        // Données synthétiques pour démo
         setTokenAnalytics([
           { token: 'SOL', trades: 28, winRate: 72, profitFactor: 2.3, avgProfit: 4.2 },
           { token: 'RAY', trades: 15, winRate: 67, profitFactor: 1.8, avgProfit: 3.5 },
@@ -107,10 +93,8 @@ const Dashboard = () => {
       }
     };
     
-    // Charger les données initiales
     loadDashboardData();
     
-    // Gestion des événements Socket.io
     socket.on('connect', () => {
       console.log('Connexion socket établie');
       socket.emit('request_update');
@@ -139,7 +123,6 @@ const Dashboard = () => {
     socket.on('bot_status_change', (status) => {
       setBotStatus(status);
       
-      // Notification
       setNotifications(prev => [
         { 
           id: Date.now(), 
@@ -154,17 +137,14 @@ const Dashboard = () => {
       if (data.report) setPerformanceData(data.report);
       if (data.recentTrades) setRecentTrades(data.recentTrades);
       
-      // Mise à jour des positions ouvertes si présentes
       if (data.report && data.report.openPositions) {
         setOpenPositions(data.report.openPositions);
       }
     });
     
     socket.on('new_trade', (trade) => {
-      // Ajouter le nouveau trade et limiter à 10
       setRecentTrades(prev => [trade, ...prev].slice(0, 10));
       
-      // Notification
       setNotifications(prev => [
         { 
           id: Date.now(), 
@@ -175,7 +155,6 @@ const Dashboard = () => {
       ]);
     });
     
-    // Nettoyage
     return () => {
       socket.off('connect');
       socket.off('connect_error');
@@ -187,7 +166,6 @@ const Dashboard = () => {
     };
   }, [selectedTimeframe]);
   
-  // Rafraîchir les données
   const refreshData = () => {
     socket.emit('request_update');
     setNotifications(prev => [
@@ -196,7 +174,6 @@ const Dashboard = () => {
     ]);
   };
   
-  // Contrôle du bot
   const startBot = async () => {
     try {
       await axios.post('/api/start');
@@ -249,7 +226,6 @@ const Dashboard = () => {
     }
   };
   
-  // Utilitaire pour déterminer le nombre de jours selon le timeframe
   const getTimeframeDays = () => {
     switch (selectedTimeframe) {
       case '24h': return 1;
@@ -260,12 +236,10 @@ const Dashboard = () => {
     }
   };
   
-  // Fermer une notification
   const closeNotification = (id) => {
     setNotifications(prev => prev.filter(notif => notif.id !== id));
   };
   
-  // Rendu conditionnel pendant le chargement
   if (loading) {
     return (
       <div className="dashboard-loading">
@@ -275,7 +249,6 @@ const Dashboard = () => {
     );
   }
   
-  // Rendu en cas d'erreur
   if (error) {
     return (
       <div className="dashboard-error">
@@ -288,7 +261,6 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard">
-      {/* Entête avec statut et contrôles */}
       <header className="dashboard-header">
         <div className="status-indicator">
           <h1>SolanaTrader Dashboard</h1>
@@ -320,7 +292,6 @@ const Dashboard = () => {
         </div>
       </header>
       
-      {/* Notifications */}
       <div className="notifications-container">
         {notifications.map(notif => (
           <div key={notif.id} className={`notification notification-${notif.type}`}>
@@ -330,7 +301,6 @@ const Dashboard = () => {
         ))}
       </div>
       
-      {/* Métriques principales */}
       <div className="metrics-grid">
         <div className="metric-card">
           <h3>Profit Total</h3>
@@ -370,7 +340,6 @@ const Dashboard = () => {
         </div>
       </div>
       
-      {/* Graphique performance */}
       <div className="chart-section">
         <div className="chart-header">
           <h2>Performance</h2>
@@ -433,7 +402,6 @@ const Dashboard = () => {
         </div>
       </div>
       
-      {/* Trades récents et Positions ouvertes */}
       <div className="two-column-section">
         <div className="card">
           <h2>Trades Récents</h2>
@@ -511,7 +479,6 @@ const Dashboard = () => {
         </div>
       </div>
       
-      {/* Graphiques d'analyse */}
       <div className="analytics-section">
         <div className="card">
           <h2>Performance par Token</h2>
@@ -561,7 +528,6 @@ const Dashboard = () => {
         </div>
       </div>
       
-      {/* Pied de page */}
       <footer className="dashboard-footer">
         <div className="footer-info">
           <p>Dernier cycle: {performanceData?.botMetrics?.lastCycleTime || 'N/A'}</p>
@@ -575,6 +541,5 @@ const Dashboard = () => {
   );
 };
 
-// Rendu du composant
 const root = createRoot(document.getElementById('app'));
 root.render(<Dashboard />);

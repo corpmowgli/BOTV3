@@ -13,43 +13,31 @@
 </head>
 <body>
   <div id="app">
-    <!-- L'application React sera rendue ici -->
     <div class="dashboard-loading">
       <div class="spinner"></div>
       <p>Chargement du dashboard...</p>
     </div>
   </div>
 
-  <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/recharts@2.5.0/umd/Recharts.min.js"></script>
-  
-  <!-- Application -->
   <script type="module" src="/dist/dashboard.bundle.js"></script>
 
-  <!-- Script pour vérifier l'authentification -->
   <script>
     (function() {
-      // Vérifier si l'utilisateur est connecté
       const token = localStorage.getItem('token');
       if (!token) {
-        // Rediriger vers la page de connexion
         window.location.href = '/login';
       }
-
-      // Configuration Axios
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
-      // Intercepteur pour rediriger vers login si token expiré
       axios.interceptors.response.use(
         response => response,
         error => {
           if (error.response && (error.response.status === 401 || error.response.status === 403)) {
             if (error.response.data.code === 'TOKEN_EXPIRED') {
-              // Tenter de rafraîchir le token
               return axios.post('/api/refresh-token')
                 .then(res => {
                   localStorage.setItem('token', res.data.token);
@@ -62,7 +50,6 @@
                   return Promise.reject(error);
                 });
             } else {
-              // Erreur d'authentification non liée à l'expiration
               localStorage.removeItem('token');
               window.location.href = '/login';
             }

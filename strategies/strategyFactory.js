@@ -1,51 +1,25 @@
-// strategies/strategyFactory.js - Usine de création des stratégies
 import { EnhancedMomentumStrategy } from './enhancedMomentumStrategy.js';
 
-/**
- * Factory pour créer des instances de stratégies de trading
- */
 export class StrategyFactory {
-  /**
-   * Crée une instance de stratégie en fonction du type spécifié
-   * @param {string} strategyType - Type de stratégie (par défaut: ENHANCED_MOMENTUM)
-   * @param {Object} config - Configuration pour initialiser la stratégie
-   * @returns {Object} Instance de la stratégie
-   * @throws {Error} Si le type de stratégie n'est pas reconnu
-   */
   static createStrategy(strategyType = 'ENHANCED_MOMENTUM', config) {
-    // Normaliser le type de stratégie (majuscules)
     const normalizedType = String(strategyType).toUpperCase();
     
     switch (normalizedType) {
       case 'ENHANCED_MOMENTUM':
         return new EnhancedMomentumStrategy(config);
-      
-      // D'autres stratégies peuvent être ajoutées ici
       case 'TREND_FOLLOWING':
-        // return new TrendFollowingStrategy(config);
         throw new Error('Stratégie TREND_FOLLOWING non implémentée');
-        
       case 'MEAN_REVERSION':
-        // return new MeanReversionStrategy(config);
         throw new Error('Stratégie MEAN_REVERSION non implémentée');
-        
       case 'BREAKOUT':
-        // return new BreakoutStrategy(config);
         throw new Error('Stratégie BREAKOUT non implémentée');
-        
       case 'VOLATILITY':
-        // return new VolatilityStrategy(config);
         throw new Error('Stratégie VOLATILITY non implémentée');
-        
       default:
         throw new Error(`Stratégie non reconnue: ${strategyType}`);
     }
   }
   
-  /**
-   * Liste toutes les stratégies disponibles avec leurs descriptions
-   * @returns {Array<Object>} Liste des stratégies
-   */
   static getAvailableStrategies() {
     return [
       {
@@ -106,22 +80,12 @@ export class StrategyFactory {
     ];
   }
   
-  /**
-   * Vérifie si un type de stratégie est disponible
-   * @param {string} strategyType - Type de stratégie à vérifier
-   * @returns {boolean} True si la stratégie est disponible
-   */
   static isStrategyAvailable(strategyType) {
     const normalizedType = String(strategyType).toUpperCase();
     return this.getAvailableStrategies()
       .some(strategy => strategy.type === normalizedType && strategy.implementationStatus === 'ACTIVE');
   }
   
-  /**
-   * Récupère les paramètres par défaut pour un type de stratégie
-   * @param {string} strategyType - Type de stratégie
-   * @returns {Object|null} Paramètres par défaut ou null si stratégie non trouvée
-   */
   static getDefaultParameters(strategyType) {
     const normalizedType = String(strategyType).toUpperCase();
     const strategy = this.getAvailableStrategies().find(s => s.type === normalizedType);
@@ -134,9 +98,7 @@ export class StrategyFactory {
       let current = defaultParams;
       
       for (let i = 0; i < nameParts.length - 1; i++) {
-        if (!current[nameParts[i]]) {
-          current[nameParts[i]] = {};
-        }
+        if (!current[nameParts[i]]) current[nameParts[i]] = {};
         current = current[nameParts[i]];
       }
       

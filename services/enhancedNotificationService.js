@@ -1,4 +1,3 @@
-// services/enhancedNotificationService.js - Service multi-canal de notifications
 import EventEmitter from 'events';
 import axios from 'axios';
 import nodemailer from 'nodemailer';
@@ -10,7 +9,6 @@ export class EnhancedNotificationService extends EventEmitter {
     super();
     this.config = config;
     
-    // Configuration des canaux
     this.channels = {
       console: {
         enabled: true,
@@ -44,14 +42,13 @@ export class EnhancedNotificationService extends EventEmitter {
       }
     };
     
-    // Options générales
     this.options = {
       enabled: options.enabled !== false,
       batchingEnabled: options.batchingEnabled !== false,
-      batchInterval: options.batchInterval || 300000, // 5min
+      batchInterval: options.batchInterval || 300000,
       throttle: {
         enabled: options.throttle?.enabled !== false,
-        period: options.throttle?.period || 60000, // 1min
+        period: options.throttle?.period || 60000,
         maxPerPeriod: {
           high: options.throttle?.maxPerPeriod?.high || 10,
           medium: options.throttle?.maxPerPeriod?.medium || 5,
@@ -61,7 +58,6 @@ export class EnhancedNotificationService extends EventEmitter {
       templates: options.templates || this._getDefaultTemplates()
     };
     
-    // État du service
     this.state = {
       totalSent: 0,
       byType: {},
@@ -77,13 +73,9 @@ export class EnhancedNotificationService extends EventEmitter {
       lastBatchSent: Date.now()
     };
     
-    // Cache pour éviter les doublons
     this.deduplicationCache = new LRUCache(100);
-    
-    // Initialiser les services de notification
     this._initializeServices();
     
-    // Démarrer le traitement des lots
     if (this.options.batchingEnabled) {
       this._initializeBatching();
     }
@@ -221,12 +213,10 @@ Généré: {{timestamp}}
   }
 
   _initializeServices() {
-    // Initialiser service d'email
     if (this.channels.email.enabled && this.channels.email.transport) {
       try {
         this.emailTransporter = nodemailer.createTransport(this.channels.email.transport);
         
-        // Vérifier la connexion
         this.emailTransporter.verify((error) => {
           if (error) {
             console.error('Erreur de configuration email:', error);
@@ -254,12 +244,10 @@ Généré: {{timestamp}}
     const profit = trade.profit !== undefined ? trade.profit : 0;
     const profitPercentage = trade.profitPercentage !== undefined ? trade.profitPercentage : 0;
     
-    // Déterminer la direction et la priorité
     const direction = (trade.direction === 'BUY') 
       ? profit >= 0 ? 'ACHAT ➚' : 'ACHAT ➘' 
       : profit >= 0 ? 'VENTE ➘' : 'VENTE ➚';
     
-    // Déterminer la priorité en fonction du profit
     let priority = 'medium';
     if (Math.abs(profitPercentage) > 10 || Math.abs(profit) > 100) {
       priority = 'high';
@@ -267,7 +255,6 @@ Généré: {{timestamp}}
       priority = 'low';
     }
     
-    // Préparer les données pour les templates
     const data = {
       type: 'trade',
       token: trade.token,
@@ -282,11 +269,9 @@ Généré: {{timestamp}}
       raw: trade
     };
     
-    // Ajouter au lot si le batching est activé
     if (this.options.batchingEnabled) {
       this.state.batches.trades.push(data);
       
-      // Si le nombre de trades dans le lot atteint une certaine limite, envoyer immédiatement
       if (this.state.batches.trades.length >= 5) {
         this._sendBatchNotifications(['trades']);
       }
@@ -304,7 +289,6 @@ Généré: {{timestamp}}
   async notifyAlert(message, priority = 'medium', data = {}) {
     if (!this.options.enabled || !message) return false;
     
-    // Préparer les données
     const notificationData = {
       message,
       timestamp: formatTimestamp(Date.now()),
@@ -312,7 +296,6 @@ Généré: {{timestamp}}
       ...data
     };
     
-    // Ajouter au lot si le batching est activé
     if (this.options.batchingEnabled) {
       this.state.batches.alerts.push(notificationData);
     }
@@ -342,16 +325,13 @@ Généré: {{timestamp}}
       };
     }
     
-    // Vérifier la déduplication pour éviter les notifications d'erreur en cascade
     const dedupeKey = `error_${errorMessage}`;
     if (this.deduplicationCache.has(dedupeKey)) {
       return false;
     }
     
-    // Enregistrer cette erreur pour la déduplication (15 minutes)
     this.deduplicationCache.set(dedupeKey, Date.now(), 900000);
     
-    // Préparer les données
     const notificationData = {
       message: errorMessage,
       timestamp: formatTimestamp(Date.now()),
@@ -359,7 +339,6 @@ Généré: {{timestamp}}
       ...errorData
     };
     
-    // Ajouter au lot si le batching est activé
     if (this.options.batchingEnabled) {
       this.state.batches.errors.push(notificationData);
     }
@@ -376,7 +355,6 @@ Généré: {{timestamp}}
   async notifySystem(message, priority = 'medium', data = {}) {
     if (!this.options.enabled || !message) return false;
     
-    // Préparer les données
     const notificationData = {
       message,
       timestamp: formatTimestamp(Date.now()),
@@ -384,7 +362,6 @@ Généré: {{timestamp}}
       ...data
     };
     
-    // Ajouter au lot si le batching est activé
     if (this.options.batchingEnabled) {
       this.state.batches.system.push(notificationData);
     }
@@ -408,7 +385,6 @@ Généré: {{timestamp}}
     
     const priority = notification.priority || 'medium';
     
-    // Vérifier le throttling
     if (this.options.throttle.enabled && !this._canSendNotification(priority)) {
       return false;
     }
@@ -422,7 +398,6 @@ Généré: {{timestamp}}
     this._updateStats(completeNotification);
     this.emit('notification', completeNotification);
     
-    // Envoyer aux canaux appropriés
     const results = await Promise.allSettled(
       Object.entries(this.channels)
         .filter(([channel, config]) => 
@@ -439,12 +414,10 @@ Généré: {{timestamp}}
     const throttle = this.options.throttle;
     const MAX_HISTORY = 100;
     
-    // Nettoyer l'historique des anciennes entrées
     this.state.history = this.state.history.filter(item => 
       (now - item.timestamp) < throttle.period
     );
     
-    // Calculer le nombre de notifications récentes par priorité
     const countByPriority = {
       high: 0,
       medium: 0,
@@ -455,18 +428,15 @@ Généré: {{timestamp}}
       countByPriority[item.priority]++;
     });
     
-    // Vérifier si on a atteint la limite pour cette priorité
     if (countByPriority[priority] >= throttle.maxPerPeriod[priority]) {
       return false;
     }
     
-    // Ajouter cette notification à l'historique
     this.state.history.push({
       timestamp: now,
       priority
     });
     
-    // Limiter la taille de l'historique
     if (this.state.history.length > MAX_HISTORY) {
       this.state.history = this.state.history.slice(-MAX_HISTORY);
     }
@@ -477,18 +447,10 @@ Généré: {{timestamp}}
   async _sendToChannel(channel, notification) {
     try {
       switch (channel) {
-        case 'console':
-          return this._sendToConsole(notification);
-          
-        case 'telegram':
-          return await this._sendToTelegram(notification);
-          
-        case 'discord':
-          return await this._sendToDiscord(notification);
-          
-        case 'email':
-          return await this._sendToEmail(notification);
-          
+        case 'console': return this._sendToConsole(notification);
+        case 'telegram': return await this._sendToTelegram(notification);
+        case 'discord': return await this._sendToDiscord(notification);
+        case 'email': return await this._sendToEmail(notification);
         default:
           console.warn(`Canal de notification non supporté: ${channel}`);
           return false;
@@ -504,14 +466,9 @@ Généré: {{timestamp}}
     
     let coloredMessage;
     switch (priority) {
-      case 'high':
-        coloredMessage = `\x1b[31m${message}\x1b[0m`; // Rouge
-        break;
-      case 'medium':
-        coloredMessage = `\x1b[33m${message}\x1b[0m`; // Jaune
-        break;
-      default:
-        coloredMessage = `\x1b[36m${message}\x1b[0m`; // Cyan
+      case 'high': coloredMessage = `\x1b[31m${message}\x1b[0m`; break;
+      case 'medium': coloredMessage = `\x1b[33m${message}\x1b[0m`; break;
+      default: coloredMessage = `\x1b[36m${message}\x1b[0m`;
     }
     
     console.log(`[${new Date().toISOString()}] [${type.toUpperCase()}] ${title}: ${coloredMessage}`);
@@ -527,22 +484,12 @@ Généré: {{timestamp}}
       const { type, data } = notification;
       let message;
       
-      // Utiliser le template spécifique au type
       switch (type) {
-        case 'trade':
-          message = this.formatMessage(this.options.templates.trade.telegramTemplate, data);
-          break;
-        case 'alert':
-          message = this.formatMessage(this.options.templates.alert.telegramTemplate, data);
-          break;
-        case 'error':
-          message = this.formatMessage(this.options.templates.error.telegramTemplate, data);
-          break;
-        case 'system':
-          message = this.formatMessage(this.options.templates.system.telegramTemplate, data);
-          break;
-        default:
-          message = notification.message;
+        case 'trade': message = this.formatMessage(this.options.templates.trade.telegramTemplate, data); break;
+        case 'alert': message = this.formatMessage(this.options.templates.alert.telegramTemplate, data); break;
+        case 'error': message = this.formatMessage(this.options.templates.error.telegramTemplate, data); break;
+        case 'system': message = this.formatMessage(this.options.templates.system.telegramTemplate, data); break;
+        default: message = notification.message;
       }
       
       const response = await axios.post(
@@ -562,43 +509,27 @@ Généré: {{timestamp}}
   }
 
   async _sendToDiscord(notification) {
-    if (!this.channels.discord.webhookUrl) {
-      return false;
-    }
+    if (!this.channels.discord.webhookUrl) return false;
     
     try {
       const { type, data } = notification;
       let content;
       
-      // Utiliser le template spécifique au type
       switch (type) {
-        case 'trade':
-          content = this.formatMessage(this.options.templates.trade.discordTemplate, data);
-          break;
-        case 'alert':
-          content = this.formatMessage(this.options.templates.alert.discordTemplate, data);
-          break;
-        case 'error':
-          content = this.formatMessage(this.options.templates.error.discordTemplate, data);
-          break;
-        case 'system':
-          content = this.formatMessage(this.options.templates.system.discordTemplate, data);
-          break;
-        default:
-          content = notification.message;
+        case 'trade': content = this.formatMessage(this.options.templates.trade.discordTemplate, data); break;
+        case 'alert': content = this.formatMessage(this.options.templates.alert.discordTemplate, data); break;
+        case 'error': content = this.formatMessage(this.options.templates.error.discordTemplate, data); break;
+        case 'system': content = this.formatMessage(this.options.templates.system.discordTemplate, data); break;
+        default: content = notification.message;
       }
       
-      // Définir la couleur selon la priorité
       let color;
       switch (notification.priority) {
         case 'high':
-          color = type === 'trade' && data.profit >= 0 ? 0x43A047 : 0xE53935; // Vert ou Rouge
+          color = type === 'trade' && data.profit >= 0 ? 0x43A047 : 0xE53935;
           break;
-        case 'medium':
-          color = 0xFFB300; // Orange
-          break;
-        default:
-          color = 0x039BE5; // Bleu
+        case 'medium': color = 0xFFB300; break;
+        default: color = 0x039BE5;
       }
       
       const payload = {
@@ -619,15 +550,12 @@ Généré: {{timestamp}}
   }
 
   async _sendToEmail(notification) {
-    if (!this.emailTransporter || !this.channels.email.to) {
-      return false;
-    }
+    if (!this.emailTransporter || !this.channels.email.to) return false;
     
     try {
       const { type, data } = notification;
       let subject, html;
       
-      // Utiliser le template spécifique au type
       switch (type) {
         case 'trade':
           subject = this.formatMessage(this.options.templates.trade.emailSubject, data);
@@ -665,19 +593,14 @@ Généré: {{timestamp}}
   }
 
   async _sendBatchNotifications(types = ['trades', 'alerts', 'errors', 'system']) {
-    // Vérifier s'il y a des notifications à envoyer
     const hasBatches = types.some(type => this.state.batches[type].length > 0);
-    if (!hasBatches) {
-      return;
-    }
+    if (!hasBatches) return;
     
-    // Préparer les résumés par type
     const tradeSummaries = this._prepareTradeSummary();
     const alertSummaries = this._prepareAlertsSummary();
     const errorSummaries = this._prepareErrorsSummary();
     const systemSummaries = this._prepareSystemSummary();
     
-    // Données pour les templates
     const data = {
       tradesSummary: tradeSummaries.text || "_Aucune transaction_",
       alertsSummary: alertSummaries.text || "_Aucune alerte_",
@@ -690,7 +613,6 @@ Généré: {{timestamp}}
       systemCount: this.state.batches.system.length
     };
     
-    // Envoyer aux canaux
     if (this.channels.telegram.enabled) {
       try {
         await axios.post(
@@ -725,7 +647,6 @@ Généré: {{timestamp}}
     
     if (this.channels.email.enabled && this.emailTransporter) {
       try {
-        // Créer une version HTML plus riche pour l'email
         await this.emailTransporter.sendMail({
           from: this.channels.email.from,
           to: this.channels.email.to,
@@ -737,7 +658,6 @@ Généré: {{timestamp}}
       }
     }
     
-    // Réinitialiser les lots
     if (types.includes('trades')) this.state.batches.trades = [];
     if (types.includes('alerts')) this.state.batches.alerts = [];
     if (types.includes('errors')) this.state.batches.errors = [];
@@ -753,7 +673,6 @@ Généré: {{timestamp}}
       return { text: '', html: '' };
     }
     
-    // Calculer les statistiques
     const totalProfit = trades.reduce((sum, t) => {
       const profitValue = typeof t.raw.profit === 'number' 
         ? t.raw.profit 
@@ -765,11 +684,9 @@ Généré: {{timestamp}}
       (typeof t.raw.profit === 'number' ? t.raw.profit : parseFloat((t.raw.profit || '0').replace(/[^0-9.-]+/g, ''))) > 0
     );
     
-    // Format texte pour Telegram/Discord
     let text = `${trades.length} transactions, ${winningTrades.length} gagnantes (${((winningTrades.length / trades.length) * 100).toFixed(0)}%)\n`;
     text += `Profit total: ${formatCurrency(totalProfit)}\n\n`;
     
-    // Ajouter les 3 principales transactions
     const sortedTrades = [...trades].sort((a, b) => {
       const profitA = typeof a.raw.profit === 'number' ? a.raw.profit : parseFloat((a.raw.profit || '0').replace(/[^0-9.-]+/g, ''));
       const profitB = typeof b.raw.profit === 'number' ? b.raw.profit : parseFloat((b.raw.profit || '0').replace(/[^0-9.-]+/g, ''));
@@ -783,7 +700,6 @@ Généré: {{timestamp}}
       });
     }
     
-    // Format HTML pour email
     let html = `
       <p><strong>${trades.length} transactions, ${winningTrades.length} gagnantes (${((winningTrades.length / trades.length) * 100).toFixed(0)}%)</strong></p>
       <p>Profit total: ${formatCurrency(totalProfit)}</p>
@@ -808,7 +724,6 @@ Généré: {{timestamp}}
       return { text: '', html: '' };
     }
     
-    // Format texte
     let text = `${alerts.length} alertes\n\n`;
     alerts.slice(0, 5).forEach((alert, i) => {
       text += `${i+1}. ${alert.message}\n`;
@@ -818,7 +733,6 @@ Généré: {{timestamp}}
       text += `... et ${alerts.length - 5} autres\n`;
     }
     
-    // Format HTML
     let html = `<p><strong>${alerts.length} alertes</strong></p><ul>`;
     alerts.slice(0, 5).forEach(alert => {
       html += `<li>${alert.message}</li>`;
@@ -840,7 +754,6 @@ Généré: {{timestamp}}
       return { text: '', html: '' };
     }
     
-    // Format texte
     let text = `${errors.length} erreurs\n\n`;
     errors.slice(0, 5).forEach((error, i) => {
       text += `${i+1}. ${error.message}\n`;
@@ -850,7 +763,6 @@ Généré: {{timestamp}}
       text += `... et ${errors.length - 5} autres\n`;
     }
     
-    // Format HTML
     let html = `<p><strong>${errors.length} erreurs</strong></p><ul>`;
     errors.slice(0, 5).forEach(error => {
       html += `<li>${error.message}</li>`;
@@ -872,7 +784,6 @@ Généré: {{timestamp}}
       return { text: '', html: '' };
     }
     
-    // Format texte
     let text = `${systemNotifs.length} notifications\n\n`;
     systemNotifs.slice(0, 5).forEach((notif, i) => {
       text += `${i+1}. ${notif.message}\n`;
@@ -882,7 +793,6 @@ Généré: {{timestamp}}
       text += `... et ${systemNotifs.length - 5} autres\n`;
     }
     
-    // Format HTML
     let html = `<p><strong>${systemNotifs.length} notifications</strong></p><ul>`;
     systemNotifs.slice(0, 5).forEach(notif => {
       html += `<li>${notif.message}</li>`;
@@ -900,11 +810,8 @@ Généré: {{timestamp}}
   _updateStats(notification) {
     this.state.totalSent++;
     this.state.lastSent = notification.timestamp;
-    
-    // Stats par type
     this.state.byType[notification.type] = (this.state.byType[notification.type] || 0) + 1;
     
-    // Historique à conserver avec limite
     if (this.state.history.length > 100) {
       this.state.history.shift();
     }
@@ -948,7 +855,6 @@ Généré: {{timestamp}}
         ...this.channels[channelName],
         ...config
       };
-      
       return true;
     }
     return false;
