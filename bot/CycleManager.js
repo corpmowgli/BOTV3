@@ -138,26 +138,46 @@ export class CycleManager extends EventEmitter {
 
   async processToken(token) {
     try {
-      if (this.positionManager.getOpenPositions().some(p => p.token === token.token_mint)) return;
+      // Ensure we're using consistent token identifiers
+      const tokenMint = token.token_mint || token.mint || token.symbol || token;
+      
+      // Check if position is already open for this token
+      if (this.positionManager.getOpenPositions().some(p => p.token === tokenMint)) return;
+      
       const [prices, volumes] = await Promise.all([
-        this.getHistoricalPrices(token.token_mint),
-        this.getHistoricalVolumes(token.token_mint)
+        this.getHistoricalPrices(tokenMint),
+        this.getHistoricalVolumes(tokenMint)
       ]);
+      
       if (!prices || prices.length < 20) return;
-      const signal = await this.strategy.analyze(token.token_mint, prices, volumes, token);
+      
+      const signal = await this.strategy.analyze(tokenMint, prices, volumes, token);
       if (signal.type !== 'NONE') this.metrics.signalsGenerated++;
+      
       if (signal.type !== 'NONE' && signal.confidence >= this.config.trading.minConfidenceThreshold) {
         if (this.riskManager.canTrade(this.portfolioManager)) {
-          const currentPrice = prices[prices.length - 1];
-          const positionSize = this.riskManager.calculatePositionSize(currentPrice, this.portfolioManager);
-          const position = await this.positionManager.openPosition(
-            token.token_mint, currentPrice, positionSize, signal
-          );
-          if (position) this.emit('info', `Opened position for ${token.token_mint} at ${currentPrice}`);
+          try {
+            const currentPrice = prices[prices.length - 1];
+            const positionSize = this.riskManager.calculatePositionSize(currentPrice, this.portfolioManager);
+            
+            if (!positionSize || positionSize <= 0) {
+              this.emit('warning', `Invalid position size calculated for ${tokenMint}`);
+              return;
+            }
+            
+            const position = await this.positionManager.openPosition(
+              tokenMint, positionSize, currentPrice, signal.type, 
+              { signal, confidence: signal.confidence }
+            );
+            
+            if (position) this.emit('info', `Opened position for ${tokenMint} at ${currentPrice}`);
+          } catch (error) {
+            this.emit('error', new Error(`Error opening position for ${tokenMint}: ${error.message}`));
+          }
         }
       }
     } catch (error) {
-      this.emit('error', new Error(`Error processing token ${token.token_mint}: ${error.message}`));
+      this.emit('error', new Error(`Error processing token ${token.token_mint || token}: ${error.message}`));
     }
   }
 
@@ -165,19 +185,51 @@ export class CycleManager extends EventEmitter {
     try {
       const positions = this.positionManager.getOpenPositions();
       if (!positions.length) return;
+      
       const currentPrices = await this.getCachedCurrentPrices();
       if (!currentPrices?.size) return;
-      const closedPositions = await this.positionManager.checkPositions(currentPrices);
-      for (const position of closedPositions) {
-        this.portfolioManager.updatePortfolio(position);
-        const tradeLog = this.logger.logTrade(position);
-        this.emit('trade', tradeLog);
+      
+      // Convert currentPrices Map to something the positionManager can use
+      const priceMapForManager = {};
+      currentPrices.forEach((price, token) => {
+        priceMapForManager[token] = price;
+      });
+      
+      // Update positions first to update trailing stops and other values
+      const updates = await this.positionManager.updatePositions(currentPrices);
+      
+      // Then check if any positions need to be closed
+      const closedPositions = [];
+      for (const position of positions) {
+        const price = currentPrices.get(position.token);
+        if (!price) continue;
+        
+        // Check if position should be closed based on conditions
+        const { shouldClose, reason } = this.riskManager.shouldClosePosition(position, price);
+        
+        if (shouldClose) {
+          try {
+            const closedPosition = await this.positionManager.closePosition(position.id, price, reason);
+            if (closedPosition) {
+              this.portfolioManager.updatePortfolio(closedPosition);
+              const tradeLog = this.logger.logTrade(closedPosition);
+              this.emit('trade', tradeLog);
+              closedPositions.push(closedPosition);
+            }
+          } catch (error) {
+            this.emit('error', new Error(`Error closing position ${position.id}: ${error.message}`));
+          }
+        }
       }
+      
       if (closedPositions.length > 0) {
         this.emit('info', `Closed ${closedPositions.length} positions`);
       }
+      
+      return closedPositions;
     } catch (error) {
       this.emit('error', new Error(`Error checking positions: ${error.message}`));
+      return [];
     }
   }
 
@@ -225,10 +277,12 @@ export class CycleManager extends EventEmitter {
     try {
       const endTime = Date.now();
       const startTime = endTime - (7 * 24 * 60 * 60 * 1000);
-      const priceData = await this.marketData.getHistoricalPrices(
-        tokenMint, startTime, endTime, '1h'
+      // Use getHistoricalData instead of getHistoricalPrices for consistency
+      const priceData = await this.marketData.getHistoricalData(
+        tokenMint, '1h', 7
       );
-      return priceData.map(d => d.price);
+      // Ensure we're returning the correct data structure
+      return priceData?.prices || [];
     } catch (error) {
       this.emit('error', new Error(`Error getting historical prices: ${error.message}`));
       return [];
@@ -239,10 +293,11 @@ export class CycleManager extends EventEmitter {
     try {
       const endTime = Date.now();
       const startTime = endTime - (7 * 24 * 60 * 60 * 1000);
-      const volumeData = await this.marketData.getHistoricalVolumes(
-        tokenMint, startTime, endTime, '1h'
+      // Use getHistoricalData which is the proper method
+      const data = await this.marketData.getHistoricalData(
+        tokenMint, '1h', 7
       );
-      return volumeData.map(d => d.volume);
+      return data?.volumes || [];
     } catch (error) {
       this.emit('error', new Error(`Error getting historical volumes: ${error.message}`));
       return [];
@@ -282,11 +337,26 @@ export class CycleManager extends EventEmitter {
     this.metrics.totalCycleDuration += cycleDuration;
     this.metrics.avgCycleDuration = this.metrics.totalCycleDuration / this.metrics.cycleCount;
     this.emit('debug', `Completed trading cycle in ${cycleDuration}ms`);
+    
+    // Emit cycle completion event with metrics
+    this.emit('cycle_completed', {
+      duration: cycleDuration,
+      success,
+      cycleCount: this.metrics.cycleCount
+    });
+    
     return success;
   }
 
   getMetrics() {
     return { ...this.metrics };
+  }
+
+  updateConfig(newConfig) {
+    if (newConfig) {
+      this.config = { ...this.config, ...newConfig };
+      this.concurrencyLimit = this.config.performance?.tokenConcurrency || 5;
+    }
   }
 
   cleanup() {

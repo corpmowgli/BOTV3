@@ -28,6 +28,8 @@ export class DataManager {
     const result = {};
     const tokensToFetch = [];
     for (const mint of tokenMints) {
+      if (!mint) continue; // Skip invalid tokens
+      
       const cachedPrice = this.priceDataCache.get(`price_${mint}`);
       if (cachedPrice !== undefined) {
         result[mint] = cachedPrice;
@@ -43,12 +45,24 @@ export class DataManager {
     }
     try {
       const prices = await this.marketData.getBatchTokenPrices(tokensToFetch);
-      Object.entries(prices).forEach(([token, price]) => {
-        if (price !== undefined && price !== null) {
-          this.priceDataCache.set(`price_${token}`, price, 60000);
-          result[token] = price;
-        }
-      });
+      
+      // Handle both object and Map returns
+      if (prices instanceof Map) {
+        prices.forEach((price, token) => {
+          if (price !== undefined && price !== null) {
+            result[token] = price;
+            this.priceDataCache.set(`price_${token}`, price, 60000);
+          }
+        });
+      } else if (typeof prices === 'object') {
+        Object.entries(prices).forEach(([token, price]) => {
+          if (price !== undefined && price !== null) {
+            result[token] = price;
+            this.priceDataCache.set(`price_${token}`, price, 60000);
+          }
+        });
+      }
+      
       this._recordProcessingTime(Date.now() - startTime);
       return result;
     } catch (error) {
@@ -95,14 +109,25 @@ export class DataManager {
       const endTime = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
+      
+      // Use marketData.getHistoricalPrices but ensure proper data structure
       const data = await this.marketData.getHistoricalPrices(
         tokenMint, startDate.getTime(), endTime.getTime(), interval
       );
-      if (data?.prices?.length > 0) {
-        this.historicalDataCache.set(cacheKey, data, 1800000);
+      
+      // Ensure we return a consistent structure
+      const result = {
+        prices: data?.prices || [],
+        volumes: data?.volumes || [],
+        timestamps: data?.timestamps || []
+      };
+      
+      if (result.prices.length > 0) {
+        this.historicalDataCache.set(cacheKey, result, 1800000);
       }
+      
       this._recordProcessingTime(Date.now() - startTime);
-      return data;
+      return result;
     } catch (error) {
       this._recordError('getHistoricalData', error);
       return { prices: [], volumes: [], timestamps: [] };
@@ -150,7 +175,7 @@ export class DataManager {
         this.tokenInfoCache.set(cacheKey, data, 300000);
       }
       this._recordProcessingTime(Date.now() - startTime);
-      return data;
+      return data || [];
     } catch (error) {
       this._recordError('getTopTokens', error);
       return [];
@@ -241,6 +266,8 @@ export class DataManager {
       const tokensToProcess = this.preloadQueue.splice(0, concurrentBatches);
       await Promise.all(tokensToProcess.map(async (token) => {
         try {
+          if (!token) return; // Skip invalid tokens
+          
           await this.getTokenPrice(token);
           setTimeout(() => {
             this.getHistoricalData(token)
@@ -302,8 +329,6 @@ export class DataManager {
   }
 
   getStats() {
-    const totalRequests = this.stats.cacheHits + this.stats.cacheMisses;
-    const hitRate = totalRequests > 0 ? (this.stats.cacheHits / totalRequests) * 100 : 0;
     return {
       ...this.stats,
       cacheSizes: {
@@ -312,9 +337,15 @@ export class DataManager {
         indicators: this.indicatorCache.getStats().size,
         tokenInfo: this.tokenInfoCache.getStats().size
       },
-      cacheHitRate: hitRate.toFixed(2) + '%',
+      cacheHitRate: this.getCacheHitRate(),
       preloadQueueSize: this.preloadQueue.length,
       isPreloading: this.isPreloading
     };
+  }
+
+  getCacheHitRate() {
+    const totalRequests = this.stats.cacheHits + this.stats.cacheMisses;
+    const hitRate = totalRequests > 0 ? (this.stats.cacheHits / totalRequests) * 100 : 0;
+    return hitRate.toFixed(2) + '%';
   }
 }

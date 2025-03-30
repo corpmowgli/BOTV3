@@ -117,12 +117,26 @@ export class PositionManager extends EventEmitter {
   }
 
   async closeAllPositions(priceMap) {
-    if (!priceMap || !(priceMap instanceof Map))
+    if (!priceMap) {
       throw new Error('Une map de prix est requise pour fermer toutes les positions');
+    }
+    
+    // Normalize priceMap to Map if it's not already
+    let normalizedPriceMap;
+    if (priceMap instanceof Map) {
+      normalizedPriceMap = priceMap;
+    } else if (typeof priceMap === 'object') {
+      normalizedPriceMap = new Map();
+      Object.entries(priceMap).forEach(([token, price]) => {
+        normalizedPriceMap.set(token, price);
+      });
+    } else {
+      throw new Error('Format de prix invalide');
+    }
     
     const results = [];
     for (const position of this.positions.values()) {
-      const currentPrice = priceMap.get(position.token);
+      const currentPrice = normalizedPriceMap.get(position.token);
       if (!currentPrice) {
         console.warn(`Prix non disponible pour ${position.token}, impossible de fermer la position`);
         continue;
@@ -137,13 +151,30 @@ export class PositionManager extends EventEmitter {
     return results;
   }
 
-  updatePositions(priceMap) {
-    if (!priceMap || !(priceMap instanceof Map)) return [];
+  async updatePositions(priceMap) {
+    // Validate and normalize the price data structure
+    let normalizedPriceMap = new Map();
+    
+    if (priceMap) {
+      if (priceMap instanceof Map) {
+        normalizedPriceMap = priceMap;
+      } else if (typeof priceMap === 'object') {
+        // Convert object to Map if needed
+        Object.entries(priceMap).forEach(([token, price]) => {
+          normalizedPriceMap.set(token, price);
+        });
+      }
+    }
+    
+    if (normalizedPriceMap.size === 0) return [];
+    
     const updates = [];
     const positionsToClose = [];
     
     for (const position of this.positions.values()) {
-      const currentPrice = priceMap.get(position.token);
+      if (!position || !position.token) continue;
+      
+      const currentPrice = normalizedPriceMap.get(position.token);
       if (!currentPrice) continue;
       
       position.currentPrice = currentPrice;
@@ -172,7 +203,7 @@ export class PositionManager extends EventEmitter {
       }
     }
     
-    this._processPositionsToClose(positionsToClose);
+    await this._processPositionsToClose(positionsToClose);
     return updates;
   }
 
@@ -190,13 +221,16 @@ export class PositionManager extends EventEmitter {
   }
 
   async _processPositionsToClose(positionsToClose) {
+    const results = [];
     for (const { id, price, reason } of positionsToClose) {
       try {
-        await this.closePosition(id, price, reason);
+        const result = await this.closePosition(id, price, reason);
+        results.push(result);
       } catch (error) {
         console.error(`Erreur lors de la fermeture automatique de la position ${id}:`, error.message);
       }
     }
+    return results;
   }
 
   getPositionByToken(token) {

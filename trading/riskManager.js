@@ -68,6 +68,50 @@ export class RiskManager extends EventEmitter {
     this.config = { ...this.config, ...newConfig };
   }
 
+  canTrade(portfolioManager) {
+    // Check circuit breaker first
+    if (this.state.circuitBreakerTriggered && Date.now() < this.state.circuitBreakerExpiry) {
+      this.emit('risk_limit_reached', {
+        type: 'CIRCUIT_BREAKER_ACTIVE',
+        reason: `Circuit breaker active until ${new Date(this.state.circuitBreakerExpiry).toLocaleString()}`
+      });
+      return false;
+    }
+    
+    // Reset daily limits if needed
+    this._resetDailyLimitsIfNeeded();
+    
+    // Check if we've hit max open positions
+    const openPositionsCount = portfolioManager.getOpenPositions().length;
+    if (openPositionsCount >= this.riskParams.maxOpenPositions) {
+      this.emit('risk_limit_reached', {
+        type: 'MAX_POSITIONS_REACHED',
+        reason: `Maximum open positions (${this.riskParams.maxOpenPositions}) reached`
+      });
+      return false;
+    }
+    
+    // Check if we've hit daily loss limit
+    if (this.state.dailyLoss > this.riskParams.maxDailyLoss) {
+      this.emit('risk_limit_reached', {
+        type: 'MAX_DAILY_LOSS',
+        reason: `Daily loss limit (${this.riskParams.maxDailyLoss}%) reached`
+      });
+      return false;
+    }
+    
+    // Check if we've hit max drawdown
+    if (this.state.currentDrawdown > this.riskParams.maxDrawdown) {
+      this.emit('risk_limit_reached', {
+        type: 'MAX_DRAWDOWN',
+        reason: `Max drawdown (${this.riskParams.maxDrawdown}%) reached`
+      });
+      return false;
+    }
+    
+    return true;
+  }
+
   checkPositionAllowed(position, marketData) {
     this._resetDailyLimitsIfNeeded();
     const checks = [
@@ -102,6 +146,28 @@ export class RiskManager extends EventEmitter {
     ];
     for (const check of checks) if (check.condition) return { allowed: false, reason: check.reason };
     return { allowed: true };
+  }
+
+  calculatePositionSize(price, portfolioManager) {
+    if (!price || price <= 0 || !portfolioManager) {
+      return 0;
+    }
+    
+    const currentCapital = portfolioManager.currentCapital;
+    const tradeSize = this.riskParams.tradeSize / 100; // Convert from percentage to decimal
+    
+    // Calculate position size based on percentage of capital
+    const positionValue = currentCapital * tradeSize;
+    
+    // Ensure minimum trade amount
+    if (positionValue < this.riskParams.minTradeAmount) {
+      return 0;
+    }
+    
+    // Calculate amount
+    const amount = positionValue / price;
+    
+    return amount;
   }
 
   calculatePositionRisk(token, entryPrice, amount, confidence, marketData = {}) {
@@ -202,27 +268,38 @@ export class RiskManager extends EventEmitter {
   }
 
   shouldClosePosition(position, currentPrice) {
+    if (!position || !currentPrice) {
+      return { shouldClose: false, reason: 'INVALID_INPUT' };
+    }
+    
     const isLong = position.direction === 'BUY';
     const effectiveStopLoss = position.trailingStop?.enabled 
       ? position.trailingStop.current 
       : position.stopLoss;
-    const checks = [
-      {
-        condition: (isLong && currentPrice <= effectiveStopLoss) || 
-                  (!isLong && currentPrice >= effectiveStopLoss),
-        reason: 'STOP_LOSS'
-      },
-      {
-        condition: (isLong && currentPrice >= position.takeProfit) ||
-                  (!isLong && currentPrice <= position.takeProfit),
-        reason: 'TAKE_PROFIT'
-      },
-      {
-        condition: position.maxDuration && (Date.now() - position.entryTime) > position.maxDuration,
-        reason: 'MAX_DURATION_EXCEEDED'
-      }
-    ];
-    for (const check of checks) if (check.condition) return { shouldClose: true, reason: check.reason };
+    
+    // Check stop loss
+    if (isLong && currentPrice <= effectiveStopLoss) {
+      return { shouldClose: true, reason: 'STOP_LOSS' };
+    }
+    
+    if (!isLong && currentPrice >= effectiveStopLoss) {
+      return { shouldClose: true, reason: 'STOP_LOSS' };
+    }
+    
+    // Check take profit
+    if (isLong && currentPrice >= position.takeProfit) {
+      return { shouldClose: true, reason: 'TAKE_PROFIT' };
+    }
+    
+    if (!isLong && currentPrice <= position.takeProfit) {
+      return { shouldClose: true, reason: 'TAKE_PROFIT' };
+    }
+    
+    // Check max duration
+    if (position.maxDuration && (Date.now() - position.entryTime) > position.maxDuration) {
+      return { shouldClose: true, reason: 'MAX_DURATION_EXCEEDED' };
+    }
+    
     return { shouldClose: false };
   }
 

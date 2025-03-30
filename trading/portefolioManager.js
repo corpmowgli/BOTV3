@@ -174,12 +174,21 @@ export class PortfolioManager {
     let portfolioValue = this.availableCapital;
     let unrealizedProfit = 0;
     
+    // Ensure currentPrices is usable regardless of being a Map or object
+    const getPriceForToken = (token) => {
+      if (!token) return null;
+      if (currentPrices instanceof Map) return currentPrices.get(token);
+      return currentPrices[token];
+    };
+    
     for (const [positionId, position] of this.openPositions.entries()) {
-      const currentPrice = currentPrices[position.token] || currentPrices.get?.(position.token);
+      if (!position || !position.token) continue;
+      
+      const currentPrice = getPriceForToken(position.token);
       
       if (currentPrice) {
         const currentValue = currentPrice * position.amount;
-        const positionProfit = currentValue - position.value - position.fees;
+        const positionProfit = currentValue - position.value - (position.fees || 0);
         const profitPercentage = (positionProfit / position.value) * 100;
         
         position.currentPrice = currentPrice;
@@ -206,8 +215,15 @@ export class PortfolioManager {
   checkPositionTriggers(currentPrices) {
     const closedPositions = [];
     
+    // Normalize currentPrices to be able to check consistently
+    const getPriceForToken = (token) => {
+      if (!token) return null;
+      if (currentPrices instanceof Map) return currentPrices.get(token);
+      return currentPrices[token];
+    };
+    
     for (const [positionId, position] of this.openPositions.entries()) {
-      const currentPrice = currentPrices[position.token] || currentPrices.get?.(position.token);
+      const currentPrice = getPriceForToken(position.token);
       
       if (!currentPrice) continue;
       
@@ -270,6 +286,48 @@ export class PortfolioManager {
       price,
       token
     };
+  }
+
+  updatePortfolio(position) {
+    if (!position) return false;
+    
+    // Check if this is a closed position being processed
+    if (position.status === 'CLOSED' || position.exitPrice) {
+      const profit = position.profit || 0;
+      this.currentCapital += profit;
+      
+      // Update asset balances
+      if (position.token) {
+        this.updateAssetBalance(position.token, -position.amount, 'add');
+      }
+      
+      // Add to available capital
+      const exitValue = position.exitPrice * position.amount;
+      const exitFees = position.exitFees || 0;
+      this.availableCapital += exitValue - exitFees;
+      
+      // Update peak and lowest capital
+      if (this.currentCapital > this.peakCapital) this.peakCapital = this.currentCapital;
+      if (this.currentCapital < this.lowestCapital) this.lowestCapital = this.currentCapital;
+      
+      // Add to closed positions history
+      this.closedPositions.push({...position});
+      
+      this.history.push({
+        timestamp: Date.now(),
+        capital: this.currentCapital,
+        type: 'POSITION_CLOSED',
+        token: position.token,
+        profit: profit,
+        profitPercentage: position.profitPercentage || 0
+      });
+      
+      // Reset performance cache
+      this.performanceCache = null;
+      return true;
+    }
+    
+    return false;
   }
 
   getMetrics() {
