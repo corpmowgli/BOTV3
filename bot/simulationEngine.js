@@ -92,12 +92,36 @@ export class SimulationEngine extends EventEmitter {
 
   async _getHistoricalTokens(startTime, endTime) {
     try {
-      const topTokens = await this.dataManager.getTopTokens(this.config.trading.maxTokensToAnalyze || 50);
+      // Added proper parameters to match expected signature
+      const topTokens = await this.dataManager.getTopTokens(
+        this.config.trading.maxTokensToAnalyze || 50,
+        this.config.trading.minLiquidity,
+        this.config.trading.minVolume24h
+      );
+      
       if(topTokens && topTokens.length > 0) return topTokens;
-      return [{token_mint:'SOL',symbol:'SOL',name:'Solana'},{token_mint:'RAY',symbol:'RAY',name:'Raydium'},{token_mint:'SRM',symbol:'SRM',name:'Serum'},{token_mint:'FIDA',symbol:'FIDA',name:'Bonfida'},{token_mint:'MNGO',symbol:'MNGO',name:'Mango Markets'}];
+      
+      // Default tokens if none returned
+      return [
+        {token_mint:'SOL',symbol:'SOL',name:'Solana'},
+        {token_mint:'RAY',symbol:'RAY',name:'Raydium'},
+        {token_mint:'SRM',symbol:'SRM',name:'Serum'},
+        {token_mint:'FIDA',symbol:'FIDA',name:'Bonfida'},
+        {token_mint:'MNGO',symbol:'MNGO',name:'Mango Markets'}
+      ];
     } catch(error) {
-      this.emit('simulation_warning', {message:`Erreur lors de la récupération des tokens: ${error.message}`,fallback:'Utilisation des tokens par défaut'});
-      return [{token_mint:'SOL',symbol:'SOL',name:'Solana'},{token_mint:'RAY',symbol:'RAY',name:'Raydium'},{token_mint:'SRM',symbol:'SRM',name:'Serum'},{token_mint:'FIDA',symbol:'FIDA',name:'Bonfida'},{token_mint:'MNGO',symbol:'MNGO',name:'Mango Markets'}];
+      this.emit('simulation_warning', {
+        message:`Erreur lors de la récupération des tokens: ${error.message}`,
+        fallback:'Utilisation des tokens par défaut'
+      });
+      
+      return [
+        {token_mint:'SOL',symbol:'SOL',name:'Solana'},
+        {token_mint:'RAY',symbol:'RAY',name:'Raydium'},
+        {token_mint:'SRM',symbol:'SRM',name:'Serum'},
+        {token_mint:'FIDA',symbol:'FIDA',name:'Bonfida'},
+        {token_mint:'MNGO',symbol:'MNGO',name:'Mango Markets'}
+      ];
     }
   }
 

@@ -2,10 +2,10 @@ import EventEmitter from 'events';
 import { delay } from '../utils/helpers.js';
 
 export class CycleManager extends EventEmitter {
-  constructor(config, marketData, strategy, riskManager, positionManager, portfolioManager, logger) {
+  constructor(config, dataManager, strategy, riskManager, positionManager, portfolioManager, logger) {
     super();
     this.config = config;
-    this.marketData = marketData;
+    this.dataManager = dataManager;
     this.strategy = strategy;
     this.riskManager = riskManager;
     this.positionManager = positionManager;
@@ -105,7 +105,7 @@ export class CycleManager extends EventEmitter {
   async preloadMarketData(tokens) {
     try {
       const tokenMints = tokens.map(token => token.token_mint);
-      if (tokenMints.length > 0) await this.marketData.getBatchTokenPrices(tokenMints);
+      if (tokenMints.length > 0) await this.dataManager.getBatchTokenPrices(tokenMints);
     } catch (error) {
       this.emit('warning', `Error preloading market data: ${error.message}`);
     }
@@ -129,7 +129,7 @@ export class CycleManager extends EventEmitter {
 
   async getQualifiedTokens() {
     try {
-      const marketData = await this.marketData.getTopTokens(
+      const marketData = await this.dataManager.getTopTokens(
         this.config.trading.maxTokensToAnalyze || 50
       );
       return marketData.filter(token => 
@@ -265,7 +265,7 @@ export class CycleManager extends EventEmitter {
       const positions = this.positionManager.getOpenPositions();
       if (!positions.length) return new Map();
       const tokens = positions.map(p => p.token);
-      const batchPrices = await this.marketData.getBatchTokenPrices(tokens);
+      const batchPrices = await this.dataManager.getBatchTokenPrices(tokens);
       const priceMap = new Map();
       if (batchPrices && typeof batchPrices === 'object') {
         Object.entries(batchPrices).forEach(([token, price]) => {
@@ -283,8 +283,8 @@ export class CycleManager extends EventEmitter {
     try {
       const endTime = Date.now();
       const startTime = endTime - (7 * 24 * 60 * 60 * 1000);
-      // Use getHistoricalData instead of getHistoricalPrices for consistency
-      const priceData = await this.marketData.getHistoricalData(
+      // Use getHistoricalData for consistency
+      const priceData = await this.dataManager.getHistoricalData(
         tokenMint, '1h', 7
       );
       // Ensure we're returning the correct data structure
@@ -300,7 +300,7 @@ export class CycleManager extends EventEmitter {
       const endTime = Date.now();
       const startTime = endTime - (7 * 24 * 60 * 60 * 1000);
       // Use getHistoricalData which is the proper method
-      const data = await this.marketData.getHistoricalData(
+      const data = await this.dataManager.getHistoricalData(
         tokenMint, '1h', 7
       );
       return data?.volumes || [];
@@ -370,7 +370,9 @@ export class CycleManager extends EventEmitter {
       clearInterval(this.cycleInterval);
       this.cycleInterval = null;
     }
-    this.priceCache.clear();
+    if (this.priceCache) {
+      this.priceCache.clear();
+    }
   }
 }
 

@@ -111,7 +111,7 @@ export class DataManager {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
       
-      // Use marketData.getHistoricalPrices but ensure proper data structure
+      // Call getHistoricalPrices on marketData with appropriate parameters
       const data = await this.marketData.getHistoricalPrices(
         tokenMint, startDate.getTime(), endTime.getTime(), interval
       );
@@ -157,10 +157,12 @@ export class DataManager {
     }
   }
 
-  async getTopTokens(limit = 20) {
+  async getTopTokens(limit = 20, minLiquidity = null, minVolume = null) {
     const startTime = Date.now();
     this.stats.requestsCount++;
-    const cacheKey = `top_tokens_${limit}`;
+    const actualMinLiquidity = minLiquidity || this.config.trading?.minLiquidity;
+    const actualMinVolume = minVolume || this.config.trading?.minVolume24h;
+    const cacheKey = `top_tokens_${limit}_${actualMinLiquidity}_${actualMinVolume}`;
     const cachedData = this.tokenInfoCache.get(cacheKey);
     if (cachedData) {
       this.stats.cacheHits++;
@@ -169,9 +171,7 @@ export class DataManager {
     }
     this.stats.cacheMisses++;
     try {
-      const minLiquidity = this.config.trading?.minLiquidity;
-      const minVolume = this.config.trading?.minVolume24h;
-      const data = await this.marketData.getTopTokens(limit, minLiquidity, minVolume);
+      const data = await this.marketData.getTopTokens(limit, actualMinLiquidity, actualMinVolume);
       if (data?.length > 0) {
         this.tokenInfoCache.set(cacheKey, data, 300000);
       }

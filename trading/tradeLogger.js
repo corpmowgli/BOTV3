@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createGzip } from 'zlib';
 import { pipeline } from 'stream';
+import { Readable } from 'stream'; // Added missing import
 import { promisify } from 'util';
 import { formatTimestamp, generateUUID, calculateMaxDrawdown, daysBetween } from '../utils/helpers.js';
 
