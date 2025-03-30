@@ -14,6 +14,7 @@ export class DataManager {
     };
     this.preloadQueue = [];
     this.isPreloading = false;
+    this._cleanupInProgress = false;
     this._scheduleCacheCleanup();
   }
 
@@ -308,13 +309,19 @@ export class DataManager {
   }
 
   _scheduleCacheCleanup() {
-    setInterval(() => {
+    this._cleanupInterval = setInterval(() => {
       try {
+        if (this._cleanupInProgress) return;
+        this._cleanupInProgress = true;
+        
         this.priceDataCache.cleanupExpired();
         this.historicalDataCache.cleanupExpired();
         this.indicatorCache.cleanupExpired();
         this.tokenInfoCache.cleanupExpired();
+        
+        this._cleanupInProgress = false;
       } catch (error) {
+        this._cleanupInProgress = false;
         console.error('Erreur nettoyage caches:', error);
       }
     }, 15 * 60 * 1000);
@@ -347,5 +354,14 @@ export class DataManager {
     const totalRequests = this.stats.cacheHits + this.stats.cacheMisses;
     const hitRate = totalRequests > 0 ? (this.stats.cacheHits / totalRequests) * 100 : 0;
     return hitRate.toFixed(2) + '%';
+  }
+  
+  cleanup() {
+    if (this._cleanupInterval) {
+      clearInterval(this._cleanupInterval);
+      this._cleanupInterval = null;
+    }
+    
+    this.clearCaches();
   }
 }

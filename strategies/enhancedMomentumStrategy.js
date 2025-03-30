@@ -4,6 +4,25 @@ import { technicalAnalysis } from '../utils/indicators.js';
 export class EnhancedMomentumStrategy extends BaseStrategy {
   constructor(config) {
     super(config);
+    
+    // Initialize indicator configuration
+    this.indicatorConfig = {
+      rsi: {
+        period: config.indicators?.rsi?.period || 14,
+        oversold: config.indicators?.rsi?.oversold || 30,
+        overbought: config.indicators?.rsi?.overbought || 70
+      },
+      macd: {
+        fastPeriod: config.indicators?.macd?.fastPeriod || 12,
+        slowPeriod: config.indicators?.macd?.slowPeriod || 26,
+        signalPeriod: config.indicators?.macd?.signalPeriod || 9
+      },
+      bollingerBands: {
+        period: config.indicators?.bollingerBands?.period || 20,
+        stdDev: config.indicators?.bollingerBands?.stdDev || 2
+      }
+    };
+    
     this.momentumConfig = {
       rsiThresholds: {
         oversold: config.indicators?.rsi?.oversold || 30,

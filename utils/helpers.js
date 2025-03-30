@@ -39,7 +39,7 @@ export const getTimeDifference = (start, end) => {
 
 export const isInRange = (value, min, max) => value >= min && value <= max;
 
-export const retry = async (fn, maxRetries = 3, baseDelay = 1000) => {
+export const retry = async (fn, maxRetries = 3, baseDelay = 1000, onRetryCallback = null) => {
   let retries = 0;
   const execute = async () => {
     try {
@@ -48,9 +48,55 @@ export const retry = async (fn, maxRetries = 3, baseDelay = 1000) => {
       if(retries >= maxRetries) throw error;
       const delay = baseDelay * Math.pow(2, retries);
       retries++;
+      
+      if (typeof onRetryCallback === 'function') {
+        onRetryCallback(retries, delay, error);
+      }
+      
       await new Promise(resolve => setTimeout(resolve, delay));
       return execute();
     }
   };
   return execute();
+};
+
+// Added missing functions
+export const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+export const formatTimestamp = (timestamp, includeTime = true) => {
+  const date = new Date(timestamp);
+  if (!includeTime) {
+    return date.toISOString().split('T')[0];
+  }
+  return date.toLocaleString();
+};
+
+export const calculateMaxDrawdown = (balanceHistory) => {
+  let maxDrawdown = 0;
+  let peak = balanceHistory[0] || 0;
+  
+  for (const balance of balanceHistory) {
+    if (balance > peak) {
+      peak = balance;
+    } else if (peak > 0) {
+      const drawdown = (peak - balance) / peak * 100;
+      maxDrawdown = Math.max(maxDrawdown, drawdown);
+    }
+  }
+  
+  return maxDrawdown;
+};
+
+export const daysBetween = (date1, date2) => {
+  const oneDay = 24 * 60 * 60 * 1000; // hours*minutes*seconds*milliseconds
+  const firstDate = new Date(date1);
+  const secondDate = new Date(date2);
+  const diffDays = Math.round(Math.abs((firstDate - secondDate) / oneDay));
+  return diffDays;
 };

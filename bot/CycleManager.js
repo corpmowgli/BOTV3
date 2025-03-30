@@ -13,6 +13,7 @@ export class CycleManager extends EventEmitter {
     this.logger = logger;
     this.isRunning = false;
     this.isStopping = false;
+    this._cycleInProgress = false;
     this.cycleInterval = null;
     this.metrics = {
       cycleCount: 0, successfulCycles: 0, failedCycles: 0, lastCycleTime: null,
@@ -71,10 +72,13 @@ export class CycleManager extends EventEmitter {
   }
 
   async runTradingCycle() {
-    if (this.isStopping || this.checkCircuitBreaker()) return false;
+    if (this.isStopping || this.checkCircuitBreaker() || this._cycleInProgress) return false;
+    
+    this._cycleInProgress = true;
     const cycleStartTime = Date.now();
     this.metrics.cycleCount++;
     this.metrics.lastCycleTime = cycleStartTime;
+    
     try {
       this.emit('debug', `Starting trading cycle #${this.metrics.cycleCount}`);
       const tokens = await this.getQualifiedTokens();
@@ -93,6 +97,8 @@ export class CycleManager extends EventEmitter {
       this.incrementCircuitBreaker(error);
       this.emit('error', new Error(`Cycle error: ${error.message}`));
       return this.completeCycle(cycleStartTime, false);
+    } finally {
+      this._cycleInProgress = false;
     }
   }
 

@@ -82,7 +82,13 @@ export class LRUCache {
   }
 
   getStats() {
-    return {...this.stats,size:this.cache.size,capacity:this.capacity,hitRate:this.stats.hits+this.stats.misses>0?(this.stats.hits/(this.stats.hits+this.stats.misses))*100:0};
+    return {
+      ...this.stats,
+      size: this.cache.size,
+      capacity: this.capacity,
+      hitRate: this.stats.hits+this.stats.misses>0?
+        (this.stats.hits/(this.stats.hits+this.stats.misses))*100:0
+    };
   }
 }
 

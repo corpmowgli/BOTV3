@@ -178,7 +178,7 @@ export class PortfolioManager {
     const getPriceForToken = (token) => {
       if (!token) return null;
       if (currentPrices instanceof Map) return currentPrices.get(token);
-      return currentPrices[token];
+      return typeof currentPrices === 'object' ? currentPrices[token] : null;
     };
     
     for (const [positionId, position] of this.openPositions.entries()) {
@@ -219,7 +219,7 @@ export class PortfolioManager {
     const getPriceForToken = (token) => {
       if (!token) return null;
       if (currentPrices instanceof Map) return currentPrices.get(token);
-      return currentPrices[token];
+      return typeof currentPrices === 'object' ? currentPrices[token] : null;
     };
     
     for (const [positionId, position] of this.openPositions.entries()) {
