@@ -1,4 +1,6 @@
-export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+export function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export const formatCurrency = (amount, currency = 'USD') => new Intl.NumberFormat('en-US', {style:'currency',currency}).format(amount);
 
@@ -60,43 +62,31 @@ export const retry = async (fn, maxRetries = 3, baseDelay = 1000, onRetryCallbac
   return execute();
 };
 
-// Added missing functions
-export const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+export function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
-};
+}
 
-export const formatTimestamp = (timestamp, includeTime = true) => {
+export function formatTimestamp(timestamp, includeTime = true) {
   const date = new Date(timestamp);
-  if (!includeTime) {
-    return date.toISOString().split('T')[0];
-  }
-  return date.toLocaleString();
-};
+  if (includeTime) return date.toISOString();
+  return date.toISOString().split('T')[0];
+}
 
-export const calculateMaxDrawdown = (balanceHistory) => {
+export function calculateMaxDrawdown(balanceHistory) {
+  let peak = balanceHistory[0];
   let maxDrawdown = 0;
-  let peak = balanceHistory[0] || 0;
-  
-  for (const balance of balanceHistory) {
-    if (balance > peak) {
-      peak = balance;
-    } else if (peak > 0) {
-      const drawdown = (peak - balance) / peak * 100;
-      maxDrawdown = Math.max(maxDrawdown, drawdown);
-    }
+  for (const value of balanceHistory) {
+    if (value > peak) peak = value;
+    const drawdown = (peak - value) / peak;
+    if (drawdown > maxDrawdown) maxDrawdown = drawdown;
   }
-  
-  return maxDrawdown;
-};
+  return maxDrawdown * 100;
+}
 
-export const daysBetween = (date1, date2) => {
-  const oneDay = 24 * 60 * 60 * 1000; // hours*minutes*seconds*milliseconds
-  const firstDate = new Date(date1);
-  const secondDate = new Date(date2);
-  const diffDays = Math.round(Math.abs((firstDate - secondDate) / oneDay));
-  return diffDays;
-};
+export function daysBetween(date1, date2) {
+  const diff = Math.abs(date2 - date1);
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
