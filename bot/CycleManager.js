@@ -16,17 +16,28 @@ export class CycleManager extends EventEmitter {
     this._cycleInProgress = false;
     this.cycleInterval = null;
     this.metrics = {
-      cycleCount: 0, successfulCycles: 0, failedCycles: 0, lastCycleTime: null,
-      avgCycleDuration: 0, totalCycleDuration: 0, tokensProcessed: 0, signalsGenerated: 0
+      cycleCount: 0, 
+      successfulCycles: 0, 
+      failedCycles: 0, 
+      lastCycleTime: null,
+      avgCycleDuration: 0, 
+      totalCycleDuration: 0, 
+      tokensProcessed: 0, 
+      signalsGenerated: 0
     };
     this.circuitBreaker = {
-      tripped: false, consecutiveErrors: 0, lastError: null, cooldownUntil: null,
+      tripped: false, 
+      consecutiveErrors: 0, 
+      lastError: null, 
+      cooldownUntil: null,
       maxConsecutiveErrors: config.errorHandling?.maxConsecutiveErrors || 3
     };
     this.priceCache = new Map();
     this.priceCacheTime = 0;
     this.priceCacheTTL = 10000;
     this.concurrencyLimit = config.performance?.tokenConcurrency || 5;
+    this.tokenProcessingQueue = [];
+    this.positionCheckInterval = null;
   }
 
   async start() {
@@ -41,6 +52,11 @@ export class CycleManager extends EventEmitter {
       await this.runTradingCycle();
       const interval = this.config.trading.cycleInterval || 60000;
       this.cycleInterval = setInterval(() => this.runTradingCycle(), interval);
+      
+      // Separate interval for checking positions more frequently
+      const positionCheckFrequency = Math.min(30000, interval / 2);
+      this.positionCheckInterval = setInterval(() => this.checkPositions(), positionCheckFrequency);
+      
       return true;
     } catch (error) {
       this.isRunning = false;
@@ -60,6 +76,10 @@ export class CycleManager extends EventEmitter {
       if (this.cycleInterval) {
         clearInterval(this.cycleInterval);
         this.cycleInterval = null;
+      }
+      if (this.positionCheckInterval) {
+        clearInterval(this.positionCheckInterval);
+        this.positionCheckInterval = null;
       }
       this.isRunning = false;
       this.isStopping = false;
@@ -105,26 +125,61 @@ export class CycleManager extends EventEmitter {
   async preloadMarketData(tokens) {
     try {
       const tokenMints = tokens.map(token => token.token_mint);
-      if (tokenMints.length > 0) await this.dataManager.getBatchTokenPrices(tokenMints);
+      if (tokenMints.length > 0) {
+        // Use Promise.all to load batch prices and market data in parallel
+        await Promise.all([
+          this.dataManager.getBatchTokenPrices(tokenMints),
+          this.preloadMarketDataForTopTokens(tokenMints.slice(0, 10))
+        ]);
+      }
     } catch (error) {
       this.emit('warning', `Error preloading market data: ${error.message}`);
     }
+  }
+  
+  async preloadMarketDataForTopTokens(tokenMints) {
+    // Preload historical data for top tokens
+    const promises = tokenMints.map(token => 
+      this.dataManager.getHistoricalData(token, '1h', 7)
+        .catch(err => this.emit('debug', `Error preloading history for ${token}: ${err.message}`))
+    );
+    await Promise.allSettled(promises);
   }
 
   async processTokensBatch(tokens) {
     const batchSize = this.concurrencyLimit;
     const openPositions = this.positionManager.getOpenPositions();
     const openPositionTokens = new Set(openPositions.map(p => p.token));
-    const tokensToProcess = tokens.filter(token => !openPositionTokens.has(token.token_mint));
-    for (let i = 0; i < tokensToProcess.length; i += batchSize) {
-      if (this.isStopping) break;
-      const batch = tokensToProcess.slice(i, i + batchSize);
-      await Promise.all(batch.map(token => this.processToken(token)));
-      this.metrics.tokensProcessed += batch.length;
-      if (i + batchSize < tokensToProcess.length && !this.isStopping) {
+    
+    // Filter out tokens that already have open positions
+    this.tokenProcessingQueue = tokens.filter(token => !openPositionTokens.has(token.token_mint));
+    
+    const processBatch = async () => {
+      if (this.isStopping || this.tokenProcessingQueue.length === 0) return;
+      
+      const batch = this.tokenProcessingQueue.splice(0, batchSize);
+      const batchPromises = batch.map(token => this.processToken(token));
+      
+      // Use Promise.allSettled to handle errors without interrupting the batch
+      const results = await Promise.allSettled(batchPromises);
+      
+      // Count processed tokens and log any errors
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          this.metrics.tokensProcessed++;
+        } else {
+          this.emit('warning', `Error processing ${batch[index].token_mint}: ${result.reason.message}`);
+        }
+      });
+      
+      // Process next batch if there are more tokens and not stopping
+      if (this.tokenProcessingQueue.length > 0 && !this.isStopping) {
         await delay(200);
+        await processBatch();
       }
-    }
+    };
+    
+    await processBatch();
   }
 
   async getQualifiedTokens() {
@@ -132,6 +187,8 @@ export class CycleManager extends EventEmitter {
       const marketData = await this.dataManager.getTopTokens(
         this.config.trading.maxTokensToAnalyze || 50
       );
+      
+      // Filter for qualified tokens based on configured criteria
       return marketData.filter(token => 
         token.liquidity >= this.config.trading.minLiquidity &&
         token.volume24h >= this.config.trading.minVolume24h
@@ -150,20 +207,23 @@ export class CycleManager extends EventEmitter {
       // Check if position is already open for this token
       if (this.positionManager.getOpenPositions().some(p => p.token === tokenMint)) return;
       
-      const [prices, volumes] = await Promise.all([
+      // Load historical data in parallel
+      const [priceData, volumeData] = await Promise.all([
         this.getHistoricalPrices(tokenMint),
         this.getHistoricalVolumes(tokenMint)
       ]);
       
-      if (!prices || prices.length < 20) return;
+      if (!priceData || priceData.length < 20) return;
       
-      const signal = await this.strategy.analyze(tokenMint, prices, volumes, token);
+      // Analyze token for trading signals
+      const signal = await this.strategy.analyze(tokenMint, priceData, volumeData, token);
       if (signal.type !== 'NONE') this.metrics.signalsGenerated++;
       
+      // Check if signal meets confidence threshold
       if (signal.type !== 'NONE' && signal.confidence >= this.config.trading.minConfidenceThreshold) {
         if (this.riskManager.canTrade(this.portfolioManager)) {
           try {
-            const currentPrice = prices[prices.length - 1];
+            const currentPrice = priceData[priceData.length - 1];
             const positionSize = this.riskManager.calculatePositionSize(currentPrice, this.portfolioManager);
             
             if (!positionSize || positionSize <= 0) {
@@ -171,9 +231,28 @@ export class CycleManager extends EventEmitter {
               return;
             }
             
+            // Calculate optimal entry parameters
+            const riskParams = this.riskManager.calculatePositionRisk(
+              tokenMint, 
+              currentPrice, 
+              positionSize, 
+              signal.confidence, 
+              { volatility: token.volatility || 'medium' }
+            );
+            
+            // Open position with enhanced parameters
             const position = await this.positionManager.openPosition(
-              tokenMint, positionSize, currentPrice, signal.type, 
-              { signal, confidence: signal.confidence }
+              tokenMint, 
+              positionSize, 
+              currentPrice, 
+              signal.type, 
+              { 
+                signal, 
+                confidence: signal.confidence,
+                stopLoss: riskParams.stopLoss,
+                takeProfit: riskParams.takeProfit,
+                trailingStop: riskParams.trailingStop
+              }
             );
             
             if (position) this.emit('info', `Opened position for ${tokenMint} at ${currentPrice}`);
@@ -245,11 +324,15 @@ export class CycleManager extends EventEmitter {
       const positions = this.positionManager.getOpenPositions();
       if (!positions.length) return new Map();
       const tokens = positions.map(p => p.token);
+      
+      // Check if cache is valid
       if (this.priceCache.size > 0 && 
           (now - this.priceCacheTime) < this.priceCacheTTL &&
           tokens.every(token => this.priceCache.has(token))) {
         return this.priceCache;
       }
+      
+      // If cache is invalid or incomplete, get fresh prices
       const priceMap = await this.getCurrentPrices();
       this.priceCache = priceMap;
       this.priceCacheTime = now;
@@ -267,11 +350,15 @@ export class CycleManager extends EventEmitter {
       const tokens = positions.map(p => p.token);
       const batchPrices = await this.dataManager.getBatchTokenPrices(tokens);
       const priceMap = new Map();
+      
       if (batchPrices && typeof batchPrices === 'object') {
         Object.entries(batchPrices).forEach(([token, price]) => {
-          priceMap.set(token, price);
+          if (price !== undefined && price !== null) {
+            priceMap.set(token, price);
+          }
         });
       }
+      
       return priceMap;
     } catch (error) {
       this.emit('error', new Error(`Error getting current prices: ${error.message}`));
@@ -281,12 +368,11 @@ export class CycleManager extends EventEmitter {
 
   async getHistoricalPrices(tokenMint) {
     try {
-      const endTime = Date.now();
-      const startTime = endTime - (7 * 24 * 60 * 60 * 1000);
       // Use getHistoricalData for consistency
       const priceData = await this.dataManager.getHistoricalData(
         tokenMint, '1h', 7
       );
+      
       // Ensure we're returning the correct data structure
       return priceData?.prices || [];
     } catch (error) {
@@ -297,8 +383,6 @@ export class CycleManager extends EventEmitter {
 
   async getHistoricalVolumes(tokenMint) {
     try {
-      const endTime = Date.now();
-      const startTime = endTime - (7 * 24 * 60 * 60 * 1000);
       // Use getHistoricalData which is the proper method
       const data = await this.dataManager.getHistoricalData(
         tokenMint, '1h', 7
@@ -362,6 +446,25 @@ export class CycleManager extends EventEmitter {
     if (newConfig) {
       this.config = { ...this.config, ...newConfig };
       this.concurrencyLimit = this.config.performance?.tokenConcurrency || 5;
+      
+      // If running, consider restarting intervals with new timings
+      if (this.isRunning && this.cycleInterval && newConfig.trading?.cycleInterval) {
+        clearInterval(this.cycleInterval);
+        this.cycleInterval = setInterval(
+          () => this.runTradingCycle(), 
+          this.config.trading.cycleInterval
+        );
+        
+        // Update position check interval if needed
+        if (this.positionCheckInterval) {
+          clearInterval(this.positionCheckInterval);
+          const positionCheckFrequency = Math.min(30000, this.config.trading.cycleInterval / 2);
+          this.positionCheckInterval = setInterval(
+            () => this.checkPositions(),
+            positionCheckFrequency
+          );
+        }
+      }
     }
   }
 
@@ -369,6 +472,10 @@ export class CycleManager extends EventEmitter {
     if (this.cycleInterval) {
       clearInterval(this.cycleInterval);
       this.cycleInterval = null;
+    }
+    if (this.positionCheckInterval) {
+      clearInterval(this.positionCheckInterval);
+      this.positionCheckInterval = null;
     }
     if (this.priceCache) {
       this.priceCache.clear();

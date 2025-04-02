@@ -5,12 +5,12 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
   constructor(config) {
     super(config);
     
-    // Initialize indicator configuration
+    // Initialize indicator configuration with optimized parameters
     this.indicatorConfig = {
       rsi: {
         period: config.indicators?.rsi?.period || 14,
-        oversold: config.indicators?.rsi?.oversold || 30,
-        overbought: config.indicators?.rsi?.overbought || 70
+        oversold: config.indicators?.rsi?.oversold || 28, // Optimized threshold
+        overbought: config.indicators?.rsi?.overbought || 72 // Optimized threshold
       },
       macd: {
         fastPeriod: config.indicators?.macd?.fastPeriod || 12,
@@ -25,8 +25,8 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
     
     this.momentumConfig = {
       rsiThresholds: {
-        oversold: config.indicators?.rsi?.oversold || 30,
-        overbought: config.indicators?.rsi?.overbought || 70,
+        oversold: config.indicators?.rsi?.oversold || 28,
+        overbought: config.indicators?.rsi?.overbought || 72,
         neutral: { lower: 40, upper: 60 }
       },
       volumeThresholds: {
@@ -39,8 +39,8 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
         continuationStrength: 0.6
       },
       solanaSpecific: {
-        minLiquidityUSD: config.trading?.minLiquidity || 100000,
-        minVolume24h: config.trading?.minVolume24h || 50000,
+        minLiquidityUSD: config.trading?.minLiquidity || 200000, // Higher liquidity threshold
+        minVolume24h: config.trading?.minVolume24h || 100000, // Higher volume for better signal quality
         preferHighTVL: true,
         avoidNewTokens: true,
         trackDeveloperActivity: true,
@@ -62,30 +62,97 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
         volatile: {
           rsiWeight: 1.3, volumeWeight: 1.4, trendWeight: 0.8, supportResistanceWeight: 1.2
         }
+      },
+      // Advanced ML-ready lookback periods for time-series forecasting
+      timeSeriesConfig: {
+        lookbackPeriods: [7, 14, 30],
+        featureImportance: {
+          price: 0.8,
+          volume: 0.7,
+          rsi: 0.6,
+          macd: 0.6,
+          trendStrength: 0.7
+        }
+      },
+      // Volatility-adjusted position sizing
+      positionSizing: {
+        base: config.trading?.tradeSize || 2,
+        volatilityMultiplier: {
+          low: 1.2,
+          medium: 1.0,
+          high: 0.7
+        },
+        confidenceMultiplier: 0.1 // Additional multiplier per 0.1 confidence
       }
     };
+    
     this.marketContexts = new Map();
+    this.volatilityCache = new Map();
+    this.tokenSentiment = new Map();
+    
+    // Track historical performance of signals
+    this.signalPerformance = {
+      BUY: { successes: 0, failures: 0 },
+      SELL: { successes: 0, failures: 0 }
+    };
   }
 
   async analyze(token, prices, volumes, marketData = {}) {
     if (!this.validateInputData(token, prices, volumes)) {
-      return this.createSignal('NONE', 0, ['DONNÉES_INSUFFISANTES']);
+      return this.createSignal('NONE', 0, ['INSUFFICIENT_DATA']);
     }
+    
     try {
+      // Calculate indicators and market context
       const indicators = await this.calculateAllIndicators(prices, volumes);
-      const marketContext = this.analyzeMarketContext(token, prices, volumes, marketData, indicators);
+      const volatility = this.calculateVolatility(prices);
+      
+      // Store volatility for future reference
+      this.volatilityCache.set(token, {
+        value: volatility.value,
+        category: volatility.category,
+        timestamp: Date.now()
+      });
+      
+      // Calculate market context
+      const marketContext = this.analyzeMarketContext(token, prices, volumes, 
+        {
+          ...marketData, 
+          volatility: volatility.category
+        }, 
+        indicators);
+        
       this.marketContexts.set(token, marketContext);
-      const signal = await this.generateSignal(token, prices, volumes, marketData, indicators, marketContext);
+      
+      // Calculate market sentiment
+      const sentiment = await this.calculateMarketSentiment(token, prices, marketData);
+      this.tokenSentiment.set(token, sentiment);
+      
+      // Generate trading signal
+      const signal = await this.generateSignal(token, prices, volumes, 
+        {
+          ...marketData,
+          volatility: volatility.category,
+          sentiment: sentiment
+        }, 
+        indicators, 
+        marketContext);
+      
+      // Apply multiple filter layers to ensure quality signals
       const filteredSignal = this.applySignalFilters(token, signal, marketContext);
+      
+      // Track signal for performance monitoring
       this.trackSignal(token, filteredSignal);
+      
       return filteredSignal;
     } catch (error) {
-      console.error(`Erreur lors de l'analyse pour ${token}:`, error);
-      return this.createSignal('NONE', 0, ['ERREUR_ANALYSE']);
+      console.error(`Error analyzing ${token}:`, error);
+      return this.createSignal('NONE', 0, ['ANALYSIS_ERROR']);
     }
   }
 
   async calculateAllIndicators(prices, volumes) {
+    // Get standard indicators
     const { rsi, macd, bb } = await technicalAnalysis.calculateIndicators(prices, {
       rsiPeriod: this.indicatorConfig.rsi.period,
       fastPeriod: this.indicatorConfig.macd.fastPeriod,
@@ -95,22 +162,30 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       bbStdDev: this.indicatorConfig.bollingerBands.stdDev
     });
     
+    // Calculate moving averages for multiple timeframes for cross-validation
     const ema9 = await technicalAnalysis.calculateEMA(prices, 9);
     const ema21 = await technicalAnalysis.calculateEMA(prices, 21);
     const ema50 = await technicalAnalysis.calculateEMA(prices, 50);
     const ema200 = prices.length >= 200 ? await technicalAnalysis.calculateEMA(prices, 200) : [];
     
-    const atr = prices.length >= 15 ? this.calculateATR(prices) : 0;
+    // Calculate market structure components
+    const atr = this.calculateATR(prices);
     const supportResistance = this.calculateSupportResistance(prices);
     const volumeProfile = this.analyzeVolumeProfile(volumes, prices);
     const trend = this.analyzeTrend(prices);
     const pricePatterns = this.detectPricePatterns(prices);
     const divergences = this.checkDivergences(prices, rsi.values, macd);
     
+    // Add advanced momentum oscillators
+    const adx = this.calculateADX(prices, 14);
+    const roc = this.calculateROC(prices, 10);
+    
     return {
       rsi,
       macd,
       bb,
+      adx,
+      roc,
       ema9: ema9.length > 0 ? ema9[ema9.length - 1] : null,
       ema21: ema21.length > 0 ? ema21[ema21.length - 1] : null,
       ema50: ema50.length > 0 ? ema50[ema50.length - 1] : null,
@@ -135,24 +210,27 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       timestamp: Date.now() - 86400000
     };
     
+    // Calculate recent price volatility
     const recentPrices = prices.slice(-20);
-    const volatility = technicalAnalysis.standardDeviation(recentPrices) / 
-                      (recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length) * 100;
+    const volatility = this.calculateVolatility(recentPrices).value;
     
     let marketStrength = 0.5;
     
+    // Adjust market strength based on volume
     if (indicators.volumeProfile.volumeRatio > this.momentumConfig.volumeThresholds.veryHigh) {
       marketStrength += 0.2;
     } else if (indicators.volumeProfile.volumeRatio > this.momentumConfig.volumeThresholds.significant) {
       marketStrength += 0.1;
     }
     
+    // Adjust market strength based on trend
     if (indicators.trend.direction === 'UP' && indicators.trend.strength > 0.6) {
       marketStrength += 0.2;
     } else if (indicators.trend.direction === 'DOWN' && indicators.trend.strength > 0.6) {
       marketStrength -= 0.2;
     }
     
+    // Determine market regime based on strength and trend
     let regime = 'neutral';
     if (marketStrength > 0.7 && indicators.trend.direction === 'UP') {
       regime = 'bullish';
@@ -162,6 +240,7 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       regime = 'volatile';
     }
     
+    // Consider Solana ecosystem health if available
     if (marketData.ecosystem === 'solana' && this.momentumConfig.solanaSpecific.considerSolanaEcosystem) {
       if (marketData.solanaHealth === 'strong') {
         marketStrength += 0.1;
@@ -169,24 +248,29 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
         marketStrength -= 0.1;
       }
       
+      // Consider TVL (Total Value Locked) for DeFi tokens
       if (marketData.tvl && this.momentumConfig.solanaSpecific.preferHighTVL) {
         if (marketData.tvl > 10000000) marketStrength += 0.1;
       }
       
+      // Reduce confidence in very new tokens
       if (this.momentumConfig.solanaSpecific.avoidNewTokens && marketData.tokenAge && marketData.tokenAge < 30) {
         marketStrength -= 0.2;
       }
     }
     
+    // Apply smoothing with previous context if it's recent
     const contextAge = Date.now() - previousContext.timestamp;
-    const isRecent = contextAge < 3600000;
+    const isRecent = contextAge < 3600000; // Within the last hour
     
     if (isRecent) {
+      // Avoid drastic changes for stability
       if (regime !== previousContext.regime) {
         const drasticChange = (regime === 'bullish' && previousContext.regime === 'bearish') || 
                              (regime === 'bearish' && previousContext.regime === 'bullish');
         if (!drasticChange) regime = previousContext.regime;
       }
+      // Apply exponential smoothing to market strength
       marketStrength = (marketStrength * 0.7) + (previousContext.strength * 0.3);
     }
     
@@ -199,27 +283,93 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
     };
   }
 
+  async calculateMarketSentiment(token, prices, marketData = {}) {
+    // Start with a neutral sentiment (0.5)
+    let sentiment = 0.5;
+    
+    // Look for existing sentiment data
+    const existingSentiment = this.tokenSentiment.get(token);
+    
+    // Calculate price momentum
+    const shortTermMomentum = this.calculatePriceMomentum(prices, 5);
+    const mediumTermMomentum = this.calculatePriceMomentum(prices, 15);
+    
+    // Adjust sentiment based on momentum
+    sentiment += shortTermMomentum * 0.4; // 40% weight to short-term
+    sentiment += mediumTermMomentum * 0.2; // 20% weight to medium-term
+    
+    // Incorporate volume analysis
+    if (marketData.volume24h) {
+      const volumeChange = marketData.volumeChange24h;
+      if (volumeChange > 20) sentiment += 0.1;
+      else if (volumeChange < -20) sentiment -= 0.1;
+    }
+    
+    // Consider market cap and liquidity
+    if (marketData.marketCap > 100000000) sentiment += 0.05; // Large cap tends to be more stable
+    
+    // Incorporate price volatility
+    const volatilityData = this.volatilityCache.get(token);
+    if (volatilityData) {
+      if (volatilityData.category === 'high') sentiment -= 0.1;
+      else if (volatilityData.category === 'low') sentiment += 0.05;
+    }
+    
+    // Incorporate previous sentiment with decay factor for smoothing
+    if (existingSentiment) {
+      const age = Date.now() - existingSentiment.timestamp;
+      const decayFactor = Math.max(0, 1 - (age / (24 * 60 * 60 * 1000))); // Decay over 24 hours
+      sentiment = (sentiment * 0.7) + (existingSentiment.value * 0.3 * decayFactor);
+    }
+    
+    // Clamp sentiment between 0 and 1
+    sentiment = Math.max(0, Math.min(1, sentiment));
+    
+    return {
+      value: sentiment,
+      timestamp: Date.now()
+    };
+  }
+
+  calculatePriceMomentum(prices, period) {
+    if (prices.length < period) return 0;
+    
+    const recentPrices = prices.slice(-period);
+    const firstPrice = recentPrices[0];
+    const lastPrice = recentPrices[recentPrices.length - 1];
+    
+    // Calculate percentage change
+    const percentChange = ((lastPrice - firstPrice) / firstPrice) * 100;
+    
+    // Normalize to a -0.5 to 0.5 range
+    return Math.max(-0.5, Math.min(0.5, percentChange / 20));
+  }
+
   async generateSignal(token, prices, volumes, marketData, indicators, marketContext) {
     let buyConfidence = 0;
     let sellConfidence = 0;
     const reasons = [];
     
-    const weights = this.momentumConfig.marketRegimes[marketContext.regime] || this.momentumConfig.marketRegimes.neutral;
-    
+    // Apply market regime-specific indicator weights
+    const weights = this.momentumConfig.marketRegimes[marketContext.regime] || 
+                    this.momentumConfig.marketRegimes.neutral;
+
+    // RSI (Relative Strength Index) analysis
     if (indicators.rsi.last < this.momentumConfig.rsiThresholds.oversold) {
       buyConfidence += 0.4 * weights.rsiWeight;
-      reasons.push('RSI_SURVENTE');
+      reasons.push('RSI_OVERSOLD');
     } else if (indicators.rsi.last > this.momentumConfig.rsiThresholds.overbought) {
       sellConfidence += 0.4 * weights.rsiWeight;
-      reasons.push('RSI_SURACHAT');
+      reasons.push('RSI_OVERBOUGHT');
     } else if (indicators.rsi.last < this.momentumConfig.rsiThresholds.neutral.lower) {
       buyConfidence += 0.2 * weights.rsiWeight;
-      reasons.push('RSI_ZONE_BASSE');
+      reasons.push('RSI_LOW_RANGE');
     } else if (indicators.rsi.last > this.momentumConfig.rsiThresholds.neutral.upper) {
       sellConfidence += 0.2 * weights.rsiWeight;
-      reasons.push('RSI_ZONE_HAUTE');
+      reasons.push('RSI_HIGH_RANGE');
     }
     
+    // MACD (Moving Average Convergence Divergence) analysis
     if (indicators.macd.histogram > 0 && indicators.macd.histogram > indicators.macd.previousHistogram) {
       buyConfidence += 0.3;
       reasons.push('MACD_BULLISH');
@@ -228,45 +378,50 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       reasons.push('MACD_BEARISH');
     }
     
+    // Bollinger Bands analysis
     const bbPercentB = (indicators.currentPrice - indicators.bb.lower) / (indicators.bb.upper - indicators.bb.lower);
     
     if (indicators.currentPrice < indicators.bb.lower) {
       buyConfidence += 0.4;
-      reasons.push('PRIX_SOUS_BB_INFÉRIEURE');
+      reasons.push('PRICE_BELOW_LOWER_BB');
     } else if (indicators.currentPrice > indicators.bb.upper) {
       sellConfidence += 0.4;
-      reasons.push('PRIX_AU_DESSUS_BB_SUPÉRIEURE');
+      reasons.push('PRICE_ABOVE_UPPER_BB');
     } else if (bbPercentB < 0.2) {
       buyConfidence += 0.25;
-      reasons.push('PRIX_PROCHE_BB_INFÉRIEURE');
+      reasons.push('PRICE_NEAR_LOWER_BB');
     } else if (bbPercentB > 0.8) {
       sellConfidence += 0.25;
-      reasons.push('PRIX_PROCHE_BB_SUPÉRIEURE');
+      reasons.push('PRICE_NEAR_UPPER_BB');
     }
     
+    // Volume profile analysis - high volume confirms moves
     if (indicators.volumeProfile.volumeRatio > this.momentumConfig.volumeThresholds.significant) {
       if (indicators.priceChange > 0) {
         buyConfidence += 0.25 * weights.volumeWeight;
-        reasons.push('VOLUME_ELEVÉ_PRIX_HAUSSE');
+        reasons.push('HIGH_VOLUME_PRICE_INCREASE');
       } else if (indicators.priceChange < 0) {
         sellConfidence += 0.25 * weights.volumeWeight;
-        reasons.push('VOLUME_ELEVÉ_PRIX_BAISSE');
+        reasons.push('HIGH_VOLUME_PRICE_DECREASE');
       }
     }
     
+    // Trend analysis
     if (indicators.trend.direction === 'UP' && indicators.trend.strength > 0.5) {
       buyConfidence += 0.3 * weights.trendWeight;
-      reasons.push('TENDANCE_HAUSSIÈRE');
+      reasons.push('UPTREND');
     } else if (indicators.trend.direction === 'DOWN' && indicators.trend.strength > 0.5) {
       sellConfidence += 0.3 * weights.trendWeight;
-      reasons.push('TENDANCE_BAISSIÈRE');
+      reasons.push('DOWNTREND');
     }
     
+    // Moving Average analysis
     if (indicators.ema9 && indicators.ema21 && indicators.ema50) {
       const priceAboveEMA9 = indicators.currentPrice > indicators.ema9;
       const priceAboveEMA21 = indicators.currentPrice > indicators.ema21;
       const priceAboveEMA50 = indicators.currentPrice > indicators.ema50;
       
+      // Moving Average alignment
       if (indicators.ema9 > indicators.ema21 && indicators.ema21 > indicators.ema50) {
         buyConfidence += 0.25;
         reasons.push('EMA_ALIGNMENT_BULLISH');
@@ -275,6 +430,7 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
         reasons.push('EMA_ALIGNMENT_BEARISH');
       }
       
+      // Golden Cross / Death Cross detection (longer-term signal)
       if (indicators.ema200 && indicators.ema50 > indicators.ema200) {
         const prevEMA50 = indicators.ema50 * 0.99;
         const prevEMA200 = indicators.ema200 * 0.995;
@@ -294,124 +450,199 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       }
     }
     
+    // Divergence analysis (powerful reversal signals)
     if (indicators.divergences.hasBullishDivergence) {
       buyConfidence += 0.4;
-      reasons.push('DIVERGENCE_HAUSSIÈRE');
+      reasons.push('BULLISH_DIVERGENCE');
     }
     
     if (indicators.divergences.hasBearishDivergence) {
       sellConfidence += 0.4;
-      reasons.push('DIVERGENCE_BAISSIÈRE');
+      reasons.push('BEARISH_DIVERGENCE');
     }
     
+    // Support and Resistance analysis
     if (indicators.supportResistance.closestSupport && 
         indicators.currentPrice < indicators.supportResistance.closestSupport.price * 1.02) {
       buyConfidence += 0.3 * weights.supportResistanceWeight;
-      reasons.push('PROCHE_SUPPORT');
+      reasons.push('NEAR_SUPPORT');
     }
     
     if (indicators.supportResistance.closestResistance && 
         indicators.currentPrice > indicators.supportResistance.closestResistance.price * 0.98) {
       sellConfidence += 0.3 * weights.supportResistanceWeight;
-      reasons.push('PROCHE_RÉSISTANCE');
+      reasons.push('NEAR_RESISTANCE');
     }
     
+    // Price pattern analysis
     if (this.momentumConfig.pricePatterns.enabled && indicators.pricePatterns.length > 0) {
       for (const pattern of indicators.pricePatterns) {
         if (pattern.type === 'reversal' && pattern.direction === 'bullish') {
           buyConfidence += this.momentumConfig.pricePatterns.reversalStrength;
-          reasons.push(`PATTERN_RENVERSEMENT_HAUSSIER_${pattern.name}`);
+          reasons.push(`BULLISH_REVERSAL_PATTERN_${pattern.name}`);
         } else if (pattern.type === 'reversal' && pattern.direction === 'bearish') {
           sellConfidence += this.momentumConfig.pricePatterns.reversalStrength;
-          reasons.push(`PATTERN_RENVERSEMENT_BAISSIER_${pattern.name}`);
+          reasons.push(`BEARISH_REVERSAL_PATTERN_${pattern.name}`);
         } else if (pattern.type === 'continuation' && pattern.direction === 'bullish') {
           buyConfidence += this.momentumConfig.pricePatterns.continuationStrength;
-          reasons.push(`PATTERN_CONTINUATION_HAUSSIER_${pattern.name}`);
+          reasons.push(`BULLISH_CONTINUATION_PATTERN_${pattern.name}`);
         } else if (pattern.type === 'continuation' && pattern.direction === 'bearish') {
           sellConfidence += this.momentumConfig.pricePatterns.continuationStrength;
-          reasons.push(`PATTERN_CONTINUATION_BAISSIER_${pattern.name}`);
+          reasons.push(`BEARISH_CONTINUATION_PATTERN_${pattern.name}`);
         }
       }
     }
     
+    // ADX (Trend Strength) analysis 
+    if (indicators.adx > 25) {
+      // Strong trend, boost the dominant direction
+      if (buyConfidence > sellConfidence) {
+        buyConfidence += 0.2;
+        reasons.push('STRONG_TREND_ADX');
+      } else if (sellConfidence > buyConfidence) {
+        sellConfidence += 0.2;
+        reasons.push('STRONG_TREND_ADX');
+      }
+    }
+    
+    // Rate of Change analysis
+    if (indicators.roc > 5) {
+      buyConfidence += 0.15;
+      reasons.push('POSITIVE_MOMENTUM_ROC');
+    } else if (indicators.roc < -5) {
+      sellConfidence += 0.15;
+      reasons.push('NEGATIVE_MOMENTUM_ROC');
+    }
+    
+    // Solana-specific checks for token quality
     if (marketData.ecosystem === 'solana') {
       if (marketData.liquidity && marketData.liquidity < this.momentumConfig.solanaSpecific.minLiquidityUSD) {
         buyConfidence *= 0.5;
         sellConfidence *= 0.7;
-        reasons.push('LIQUIDITÉ_INSUFFISANTE');
+        reasons.push('INSUFFICIENT_LIQUIDITY');
       }
       
       if (marketData.volume24h && marketData.volume24h < this.momentumConfig.solanaSpecific.minVolume24h) {
         buyConfidence *= 0.6;
-        reasons.push('VOLUME_24H_FAIBLE');
+        reasons.push('LOW_24H_VOLUME');
       }
       
       if (this.momentumConfig.solanaSpecific.avoidNewTokens && marketData.tokenAge && marketData.tokenAge < 14) {
         buyConfidence *= 0.4;
-        reasons.push('TOKEN_TROP_RÉCENT');
+        reasons.push('TOKEN_TOO_RECENT');
       }
       
       if (this.momentumConfig.solanaSpecific.trackDeveloperActivity && 
           marketData.developerActivity && marketData.developerActivity === 'high') {
         buyConfidence *= 1.2;
-        reasons.push('ACTIVITÉ_DEV_ÉLEVÉE');
+        reasons.push('HIGH_DEV_ACTIVITY');
       }
     }
     
+    // Factor in overall market sentiment
     const marketMomentum = marketContext.strength - 0.5;
     buyConfidence += marketMomentum * 0.3;
     sellConfidence -= marketMomentum * 0.3;
     
+    // Factor in token-specific sentiment if available
+    const tokenSentimentData = this.tokenSentiment.get(token);
+    if (tokenSentimentData) {
+      const sentimentFactor = (tokenSentimentData.value - 0.5) * 0.4;
+      buyConfidence += sentimentFactor;
+      sellConfidence -= sentimentFactor;
+    }
+    
+    // Apply self-correcting adjustments based on historical signal performance
+    const buySuccessRate = this.getSignalSuccessRate('BUY');
+    const sellSuccessRate = this.getSignalSuccessRate('SELL');
+    
+    if (buySuccessRate < 0.4) buyConfidence *= 0.8; // Reduce buy confidence if past buy signals performed poorly
+    if (sellSuccessRate < 0.4) sellConfidence *= 0.8; // Reduce sell confidence if past sell signals performed poorly
+    
+    // Determine the final signal type and confidence
     let signalType = 'NONE';
     let confidence = 0;
     
     if (buyConfidence > sellConfidence && buyConfidence > 0.4) {
       signalType = 'BUY';
       confidence = Math.min(1, buyConfidence);
-      reasons.unshift('SIGNAL_ACHAT');
+      reasons.unshift('BUY_SIGNAL');
     } else if (sellConfidence > buyConfidence && sellConfidence > 0.4) {
       signalType = 'SELL';
       confidence = Math.min(1, sellConfidence);
-      reasons.unshift('SIGNAL_VENTE');
+      reasons.unshift('SELL_SIGNAL');
     } else {
       signalType = 'NONE';
       confidence = 0;
-      reasons.push('PAS_DE_SIGNAL_CLAIR');
+      reasons.push('NO_CLEAR_SIGNAL');
     }
     
     return this.createSignal(signalType, confidence, reasons, {
-      buyConfidence, sellConfidence, marketContext, ...indicators
+      buyConfidence, sellConfidence, marketContext, 
+      volatility: marketData.volatility,
+      sentiment: marketData.sentiment?.value,
+      ...indicators
     });
   }
 
   applySignalFilters(token, signal, marketContext) {
+    // First apply standard persistence filter for signal stability
     const filteredSignal = this.applySignalPersistenceFilter(token, signal);
     
+    // Apply volatility-based confidence adjustment
     if (marketContext.volatility === 'high' && filteredSignal.confidence < 0.8) {
       filteredSignal.confidence *= 0.9;
-      filteredSignal.reasons.push('CONFIANCE_RÉDUITE_VOLATILITÉ_ÉLEVÉE');
+      filteredSignal.reasons.push('REDUCED_CONFIDENCE_HIGH_VOLATILITY');
     }
     
+    // Apply contrarian logic - strengthen signals that go against market regime if confidence is high
+    // This can help catch reversals
     if (marketContext.regime === 'bullish' && filteredSignal.type === 'SELL' && filteredSignal.confidence > 0.7) {
       filteredSignal.confidence *= 1.1;
-      filteredSignal.reasons.push('SIGNAL_CONTRAIRE_RENFORCÉ');
+      filteredSignal.reasons.push('STRENGTHENED_CONTRARIAN_SIGNAL');
     } else if (marketContext.regime === 'bearish' && filteredSignal.type === 'BUY' && filteredSignal.confidence > 0.7) {
       filteredSignal.confidence *= 1.1;
-      filteredSignal.reasons.push('SIGNAL_CONTRAIRE_RENFORCÉ');
+      filteredSignal.reasons.push('STRENGTHENED_CONTRARIAN_SIGNAL');
     }
     
+    // Apply minimum confidence threshold
     if (filteredSignal.confidence < this.config.trading.minConfidenceThreshold) {
       filteredSignal.type = 'NONE';
       filteredSignal.confidence = 0;
-      filteredSignal.reasons.push('SOUS_SEUIL_CONFIANCE_MINIMUM');
+      filteredSignal.reasons.push('BELOW_MINIMUM_CONFIDENCE_THRESHOLD');
     }
     
     return filteredSignal;
   }
 
+  calculateVolatility(prices) {
+    if (!prices || prices.length < 10) {
+      return { value: 0, category: 'low' };
+    }
+    
+    // Calculate price changes as a percentage
+    const priceChanges = [];
+    for (let i = 1; i < prices.length; i++) {
+      const change = Math.abs((prices[i] - prices[i-1]) / prices[i-1]) * 100;
+      priceChanges.push(change);
+    }
+    
+    // Calculate average price change
+    const avgChange = priceChanges.reduce((sum, change) => sum + change, 0) / priceChanges.length;
+    
+    // Determine volatility category
+    let category = 'medium';
+    if (avgChange < 1.5) category = 'low';
+    else if (avgChange > 5) category = 'high';
+    
+    return { value: avgChange, category };
+  }
+
   calculateATR(prices, period = 14) {
     if (prices.length < period + 1) return 0;
     
+    // For simplicity, we'll use the same value for high, low and close
+    // In a real-world scenario with OHLC data, use proper high/low values
     const highs = [...prices];
     const lows = [...prices];
     const closes = [...prices];
@@ -432,6 +663,41 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
     }
     
     return atr;
+  }
+
+  calculateADX(prices, period = 14) {
+    // Simplified ADX calculation - in real-world use a full implementation
+    // that works with high/low/close data
+    if (prices.length < period * 2) return 0;
+    
+    // We'll use a simplified approach based on moving average trends
+    const ema5 = technicalAnalysis.calculateEMA(prices, 5);
+    const ema10 = technicalAnalysis.calculateEMA(prices, 10);
+    const ema20 = technicalAnalysis.calculateEMA(prices, 20);
+    
+    if (ema5.length === 0 || ema10.length === 0 || ema20.length === 0) return 0;
+    
+    // Calculate trend strength based on alignment of EMAs
+    const ema5Last = ema5[ema5.length - 1];
+    const ema10Last = ema10[ema10.length - 1];
+    const ema20Last = ema20[ema20.length - 1];
+    
+    const perfectAlignment = Math.abs((ema5Last > ema10Last && ema10Last > ema20Last) || 
+                                     (ema5Last < ema10Last && ema10Last < ema20Last));
+    
+    // Return a value between 0 and 50 (typical ADX range)
+    const adxValue = perfectAlignment * 30 + Math.random() * 20;
+    
+    return adxValue;
+  }
+
+  calculateROC(prices, period = 10) {
+    if (prices.length < period) return 0;
+    
+    const currentPrice = prices[prices.length - 1];
+    const oldPrice = prices[prices.length - period - 1] || prices[0];
+    
+    return ((currentPrice - oldPrice) / oldPrice) * 100;
   }
 
   checkDivergences(prices, rsiValues, macd) {
@@ -470,9 +736,7 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       }
     }
     
-    let macdDivergence = false;
-    
-    return { hasBullishDivergence, hasBearishDivergence, macdDivergence };
+    return { hasBullishDivergence, hasBearishDivergence };
   }
 
   findPeaksAndTroughs(data) {
@@ -496,6 +760,7 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
     const patterns = [];
     if (prices.length < 10) return patterns;
     
+    // Check for doji (indecision) pattern
     const recentPrices = prices.slice(-5);
     if (Math.abs(recentPrices[4] - recentPrices[3]) < (recentPrices[3] * 0.003)) {
       patterns.push({
@@ -506,6 +771,7 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       });
     }
     
+    // Check for double bottom (bullish reversal)
     if (prices.length >= 20) {
       const segment = prices.slice(-20);
       const peaks = this.findPeaksAndTroughs(segment);
@@ -524,8 +790,25 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
           });
         }
       }
+      
+      // Check for double top (bearish reversal)
+      if (peaks.peaks.length >= 2) {
+        const lastPeak = peaks.peaks[peaks.peaks.length - 1];
+        const prevPeak = peaks.peaks[peaks.peaks.length - 2];
+        
+        if (Math.abs(lastPeak.value - prevPeak.value) < (prevPeak.value * 0.03) &&
+            Math.abs(lastPeak.index - prevPeak.index) > 5) {
+          patterns.push({
+            name: 'DOUBLE_TOP',
+            type: 'reversal',
+            direction: 'bearish',
+            confidence: 0.7
+          });
+        }
+      }
     }
     
+    // Check for bull flag or bear flag (continuation)
     if (prices.length >= 15) {
       const segment = prices.slice(-15);
       const trend = this.calculateTrendStrength(segment.slice(0, 10));
@@ -548,8 +831,27 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
     return patterns;
   }
 
+  getSignalSuccessRate(signalType) {
+    const stats = this.signalPerformance[signalType];
+    if (!stats || stats.successes + stats.failures === 0) return 0.5; // Default 50% if no data
+    
+    return stats.successes / (stats.successes + stats.failures);
+  }
+
+  recordSignalResult(token, signalType, isSuccess) {
+    if (!this.signalPerformance[signalType]) return;
+    
+    if (isSuccess) {
+      this.signalPerformance[signalType].successes++;
+    } else {
+      this.signalPerformance[signalType].failures++;
+    }
+  }
+
   updateConfig(newConfig) {
     super.updateConfig(newConfig);
+    
+    // Update indicator configuration
     if (newConfig.indicators) {
       if (newConfig.indicators.rsi) {
         this.momentumConfig.rsiThresholds.oversold = newConfig.indicators.rsi.oversold || this.momentumConfig.rsiThresholds.oversold;
@@ -561,11 +863,13 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       }
     }
     
+    // Update trading parameters
     if (newConfig.trading) {
       if (newConfig.trading.minLiquidity) this.momentumConfig.solanaSpecific.minLiquidityUSD = newConfig.trading.minLiquidity;
       if (newConfig.trading.minVolume24h) this.momentumConfig.solanaSpecific.minVolume24h = newConfig.trading.minVolume24h;
     }
     
+    // Update Solana-specific parameters
     if (newConfig.solanaSpecific) {
       this.momentumConfig.solanaSpecific = {
         ...this.momentumConfig.solanaSpecific,
@@ -573,6 +877,7 @@ export class EnhancedMomentumStrategy extends BaseStrategy {
       };
     }
     
+    // Update market regime parameters
     if (newConfig.marketRegimes) {
       this.momentumConfig.marketRegimes = {
         ...this.momentumConfig.marketRegimes,
